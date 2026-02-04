@@ -2,6 +2,25 @@ import asyncio
 import logging
 import sys
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def start_dummy():
+    port = int(os.environ.get("PORT", 8000))  # Koyeb يمرر PORT كـ env var
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    print(f"Dummy health server started on port {port}")
+    server.serve_forever()
+
+# شغله في خلفية
+threading.Thread(target=start_dummy, daemon=True).start()
+
+# بعد كده كود البوت العادي...
 
 # إضافة المسار الحالي لضمان العثور على المجلدات في Render
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
