@@ -174,6 +174,12 @@ class DatabaseManager:
         await db.execute("UPDATE users SET language = ? WHERE telegram_id = ?", (language, telegram_id))
         await db.commit()
 
+    async def update_user_currency(self, telegram_id: int, currency: str):
+        """تحديث عملة المستخدم"""
+        db = await self.connect()
+        await db.execute("UPDATE users SET currency = ? WHERE telegram_id = ?", (currency, telegram_id))
+        await db.commit()
+
     async def block_user(self, telegram_id: int):
         """حظر مستخدم"""
         db = await self.connect()
@@ -190,21 +196,21 @@ class DatabaseManager:
         """بحث متقدم عن المستخدمين بـ ID أو Username أو الاسم"""
         db = await self.connect()
         
+        # محاولة البحث كـ ID كامل أولاً
         if query.isdigit():
-            # البحث بـ ID
-            cursor = await db.execute(
-                "SELECT * FROM users WHERE telegram_id = ? LIMIT ?",
-                (int(query), limit)
-            )
-        else:
-            # البحث بـ Username أو الاسم
-            search_pattern = f"%{query}%"
-            cursor = await db.execute(
-                """SELECT * FROM users 
-                   WHERE username LIKE ? OR first_name LIKE ? OR last_name LIKE ?
-                   ORDER BY created_at DESC LIMIT ?""",
-                (search_pattern, search_pattern, search_pattern, limit)
-            )
+            cursor = await db.execute("SELECT * FROM users WHERE telegram_id = ?", (int(query),))
+            row = await cursor.fetchone()
+            if row:
+                return [dict(row)]
+        
+        # البحث بالنمط
+        search_pattern = f"%{query}%"
+        cursor = await db.execute(
+            """SELECT * FROM users 
+               WHERE telegram_id LIKE ? OR username LIKE ? OR first_name LIKE ? OR last_name LIKE ?
+               ORDER BY created_at DESC LIMIT ?""",
+            (search_pattern, search_pattern, search_pattern, search_pattern, limit)
+        )
         
         return [dict(row) for row in await cursor.fetchall()]
 
@@ -253,41 +259,36 @@ class DatabaseManager:
         """, (user_id, OrderStatus.COMPLETED, OrderStatus.FAILED, OrderStatus.CANCELED))
         row = await cursor.fetchone()
         return row['count'] > 0
-    async def update_user_balance(self, user_id: int, amount: float, log_type: str, admin_id: int = None, reason: str = None, order_id: int = None) -> tuple[bool, Any]:
+    async def update_user_balance(self, user_id: int, amount: float, log_type: str, reason: str = None, admin_id: int = None, order_id: int = None) -> tuple[bool, Any]:
         """
         تحديث رصيد المستخدم مع Transaction آمن
         """
+        db = await self.connect()
         async with self._lock:
-            db = await self.connect()
             try:
-                # التحقق من وجود Transaction نشط
-                in_transaction = db.in_transaction
-                if not in_transaction:
-                    await db.execute("BEGIN")
-                
+                # التحقق من وجود المستخدم أولاً
                 cursor = await db.execute("SELECT balance FROM users WHERE telegram_id = ?", (user_id,))
                 user = await cursor.fetchone()
                 if not user:
-                    raise Exception("User not found")
+                    return False, "User not found"
                 
                 balance_before = user['balance']
                 balance_after = balance_before + amount
                 
                 if balance_after < 0:
-                    raise Exception("Insufficient balance")
+                    return False, "Insufficient balance"
                 
+                # تنفيذ العملية
                 await db.execute("UPDATE users SET balance = ? WHERE telegram_id = ?", (balance_after, user_id))
                 await db.execute("""
                     INSERT INTO financial_logs (user_id, order_id, type, amount, balance_before, balance_after, admin_id, reason)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (user_id, order_id, log_type, amount, balance_before, balance_after, admin_id, reason))
                 
-                if not in_transaction:
-                    await db.commit()
+                await db.commit()
                 return True, balance_after
             except Exception as e:
-                if not db.in_transaction:
-                    await db.rollback()
+                await db.rollback()
                 return False, str(e)
 
     # --- المنتجات والأقسام والمزودين ---

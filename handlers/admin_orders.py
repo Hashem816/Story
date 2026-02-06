@@ -107,3 +107,71 @@ async def cancel_order(callback: types.CallbackQuery, is_operator: bool, bot: Bo
     lang = get_user_language(user_data)
     await bot.send_message(order['telegram_id'], f"❌ نعتذر، تم إلغاء طلبك `#{order_id}`." if lang == "ar" else f"❌ Sorry, your order `#{order_id}` has been canceled.")
     await list_active_orders(callback, is_operator)
+
+@router.callback_query(F.data.startswith("admin_pay_approve_"))
+async def admin_pay_approve(callback: types.CallbackQuery, bot: Bot):
+    """قبول طلب شحن الرصيد - إصلاح شامل"""
+    try:
+        data = callback.data.split("_")
+        # التحقق من صحة البيانات المرسلة في callback_data
+        if len(data) < 5:
+            return await callback.answer("❌ خطأ في بيانات الطلب", show_alert=True)
+            
+        user_id = int(data[3])
+        amount = float(data[4])
+        
+        # تنفيذ عملية الشحن في قاعدة البيانات
+        success, result = await db_manager.update_user_balance(
+            user_id=user_id,
+            amount=amount,
+            log_type="DEPOSIT",
+            reason=f"شحن رصيد (موافقة الإدارة: {callback.from_user.id})"
+        )
+        
+        if success:
+            # تحديث الرسالة في قناة/مجموعة الإدارة
+            new_caption = callback.message.caption + f"\n\n✅ *تم القبول بواسطة:* {callback.from_user.first_name}\n💰 *الرصيد الجديد:* `{result:.2f}$`"
+            if callback.message.photo:
+                await callback.message.edit_caption(caption=new_caption, reply_markup=None, parse_mode="Markdown")
+            else:
+                await callback.message.edit_text(text=new_caption, reply_markup=None, parse_mode="Markdown")
+            
+            # إشعار المستخدم
+            try:
+                await bot.send_message(
+                    user_id, 
+                    f"✅ *تم قبول طلب الشحن!*\n\n💰 المبلغ المضاف: `{amount}$`\n💳 رصيدك الحالي: `{result:.2f}$`",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to notify user {user_id}: {e}")
+                
+            await callback.answer("✅ تم شحن الرصيد بنجاح")
+        else:
+            await callback.answer(f"❌ فشل الشحن: {result}", show_alert=True)
+            
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error in admin_pay_approve: {e}", exc_info=True)
+        await callback.answer("❌ حدث خطأ تقني أثناء معالجة الطلب", show_alert=True)
+
+@router.callback_query(F.data.startswith("admin_pay_reject_"))
+async def admin_pay_reject(callback: types.CallbackQuery, bot: Bot):
+    """رفض طلب شحن الرصيد"""
+    try:
+        data = callback.data.split("_")
+        user_id = int(data[3])
+        
+        new_caption = callback.message.caption + f"\n\n❌ *تم الرفض بواسطة:* {callback.from_user.first_name}"
+        if callback.message.photo:
+            await callback.message.edit_caption(caption=new_caption, reply_markup=None, parse_mode="Markdown")
+        else:
+            await callback.message.edit_text(text=new_caption, reply_markup=None, parse_mode="Markdown")
+            
+        await bot.send_message(user_id, "❌ عذراً، تم رفض طلب شحن الرصيد الخاص بك. يرجى التواصل مع الدعم لمزيد من التفاصيل.")
+        await callback.answer("❌ تم رفض الطلب")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error in admin_pay_reject: {e}", exc_info=True)
+        await callback.answer("❌ حدث خطأ أثناء رفض الطلب", show_alert=True)

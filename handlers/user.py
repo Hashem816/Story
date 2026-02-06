@@ -362,14 +362,95 @@ async def show_support(message: types.Message):
 
 @router.message(F.text.in_(["👤 حسابي", "👤 My Account"]))
 async def show_account(message: types.Message, user: dict):
-    """عرض معلومات الحساب"""
-    await message.answer(
+    """عرض معلومات الحساب مع العملة المفضلة"""
+    lang = get_user_language(user)
+    currency = user.get('currency', 'USD')
+    balance = user['balance']
+    
+    # تحويل الرصيد إذا كانت العملة ليرة سورية
+    if currency == 'SYP':
+        rate = float(await db_manager.get_setting('dollar_rate', '12500'))
+        display_balance = f"{balance * rate:,.0f} ل.س"
+    else:
+        display_balance = f"{balance:.2f}$"
+        
+    text = (
         f"👤 *معلومات الحساب*\n\n"
-        f"🆔 معرفك: `{user['telegram_id']}`\n"
-        f"💰 الرصيد: `{user['balance']:.2f}$`\n"
-        f"📊 الرتبة: `{user.get('role', 'USER')}`",
-        parse_mode="Markdown"
+        f"🆔 معرفك: `{message.from_user.id}`\n"
+        f"💰 الرصيد الحالي: `{display_balance}`\n"
+        f"🎖 الرتبة: `{user.get('role', 'USER')}`\n"
+        f"💵 العملة المفضلة: `{currency}`\n"
+        f"📅 انضممت في: `{user.get('created_at', 'N/A')}`"
     )
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="💵 تغيير العملة", callback_data="select_currency"))
+    builder.row(InlineKeyboardButton(text="🎟️ استخدام كوبون", callback_data="use_coupon_main"))
+    
+    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+@router.callback_query(F.data == "select_currency")
+async def select_currency_menu(callback: types.CallbackQuery):
+    """قائمة اختيار العملة"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🇺🇸 دولار (USD)", callback_data="set_currency_USD"),
+        InlineKeyboardButton(text="🇸🇾 ليرة سورية (SYP)", callback_data="set_currency_SYP")
+    )
+    await callback.message.edit_text("💵 اختر العملة التي تفضل عرض الأسعار بها:", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data.startswith("set_currency_"))
+async def set_currency_execute(callback: types.CallbackQuery):
+    """تنفيذ تغيير العملة"""
+    currency = callback.data.split("_")[2]
+    await db_manager.update_user_currency(callback.from_user.id, currency)
+    await callback.answer(f"✅ تم تغيير العملة المفضلة إلى {currency}")
+    # إعادة عرض الحساب
+    user = await db_manager.get_user(callback.from_user.id)
+    await show_account(callback.message, user)
+
+@router.callback_query(F.data == "use_coupon_main")
+async def use_coupon_prompt(callback: types.CallbackQuery, state: FSMContext):
+    """طلب رمز الكوبون من المستخدم"""
+    await state.set_state("waiting_for_coupon_main")
+    await callback.message.edit_text("🎟️ أرسل رمز الكوبون الذي تملكه لشحن رصيدك أو الحصول على خصم:")
+
+@router.message(F.text, StateFilter("waiting_for_coupon_main"))
+async def use_coupon_execute(message: types.Message, state: FSMContext):
+    """تنفيذ استخدام الكوبون"""
+    code = message.text.strip().upper()
+    user_id = message.from_user.id
+    
+    # التحقق من الكوبون
+    coupon = await db_manager.get_coupon(code)
+    if not coupon or not coupon['is_active']:
+        return await message.answer("❌ الكوبون غير صحيح أو منتهي الصلاحية.")
+        
+    if coupon['used_count'] >= coupon['max_uses']:
+        return await message.answer("❌ تم استهلاك جميع استخدامات هذا الكوبون.")
+        
+    # هنا يمكن تحديد إذا كان الكوبون يعطي رصيداً مباشراً
+    if coupon['type'] == 'FIXED':
+        amount = coupon['value']
+        success, new_bal = await db_manager.update_user_balance(
+            user_id=user_id,
+            amount=amount,
+            log_type="COUPON",
+            reason=f"استخدام كوبون: {code}"
+        )
+        if success:
+            # تحديث عدد مرات استخدام الكوبون
+            db = await db_manager.connect()
+            await db.execute("UPDATE coupons SET used_count = used_count + 1 WHERE id = ?", (coupon['id'],))
+            await db.commit()
+            
+            await message.answer(f"✅ تم استخدام الكوبون بنجاح! تم إضافة {amount}$ إلى رصيدك.")
+            await state.clear()
+        else:
+            await message.answer(f"❌ حدث خطأ: {new_bal}")
+    else:
+        await message.answer("ℹ️ هذا الكوبون مخصص للخصم عند الشراء فقط، وليس للشحن المباشر.")
+        await state.clear()
 
 
 @router.message(F.text.in_(["📦 طلباتي", "📦 My Orders"]))

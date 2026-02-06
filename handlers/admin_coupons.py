@@ -32,24 +32,42 @@ async def admin_coupons_main(callback: types.CallbackQuery, is_admin: bool, user
     
     lang = get_user_language(user)
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(
-        text=get_text("create_coupon", lang),
-        callback_data="admin_coupon_create_start"
-    ))
-    builder.row(InlineKeyboardButton(
-        text=get_text("list_coupons", lang),
-        callback_data="admin_coupon_list"
-    ))
-    builder.row(InlineKeyboardButton(
-        text=get_text("btn_back", lang),
-        callback_data="admin_main"
-    ))
+    builder.row(InlineKeyboardButton(text="➕ إنشاء كوبون جديد", callback_data="admin_coupon_create_start"))
+    builder.row(InlineKeyboardButton(text="📋 عرض الكوبونات", callback_data="admin_coupon_list"))
+    builder.row(InlineKeyboardButton(text="📊 إحصائيات الكوبونات", callback_data="admin_coupon_stats"))
+    builder.row(InlineKeyboardButton(text=get_text("btn_back", lang), callback_data="admin_main"))
     
     await callback.message.edit_text(
-        get_text("coupons_management", lang),
+        "🎟️ *نظام إدارة الكوبونات المطور*\n\nيمكنك إنشاء كوبونات خصم بنسبة مئوية أو بمبلغ ثابت، وتحديد الحد الأدنى للشراء وعدد مرات الاستخدام.",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
+
+@router.callback_query(F.data == "admin_coupon_stats")
+async def admin_coupon_stats(callback: types.CallbackQuery, is_admin: bool):
+    """إحصائيات الكوبونات"""
+    if not is_admin: return
+    
+    db = await db_manager.connect()
+    cursor = await db.execute("""
+        SELECT 
+            COUNT(*) as total,
+            SUM(used_count) as total_uses,
+            SUM(CASE WHEN is_active=1 THEN 1 ELSE 0 END) as active
+        FROM coupons
+    """)
+    stats = await cursor.fetchone()
+    
+    text = (
+        f"📊 *إحصائيات الكوبونات*\n\n"
+        f"🎟️ إجمالي الكوبونات: `{stats['total']}`\n"
+        f"✅ كوبونات نشطة: `{stats['active']}`\n"
+        f"📈 إجمالي مرات الاستخدام: `{stats['total_uses']}`"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔙 عودة", callback_data="admin_coupons"))
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 @router.callback_query(F.data == "admin_coupon_create_start")
 async def admin_coupon_create_start(callback: types.CallbackQuery, state: FSMContext, is_admin: bool, user: dict):

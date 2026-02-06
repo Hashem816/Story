@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
     internal_notes TEXT,
     is_active INTEGER DEFAULT 1,
     language TEXT DEFAULT 'ar', -- ar, en
+    currency TEXT DEFAULT 'USD', -- USD, SYP
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -142,6 +143,7 @@ CREATE TABLE IF NOT EXISTS coupons (
     is_active INTEGER DEFAULT 1,
     expires_at DATETIME,
     created_by INTEGER,
+    description TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(created_by) REFERENCES users(telegram_id)
 );

@@ -306,28 +306,26 @@ async def admin_delete_pay_execute(callback: types.CallbackQuery, is_operator: b
         return
     
     method_id = int(callback.data.split("_")[4])
-    method = await db_manager.get_payment_method(method_id)
     
-    if not method:
-        await callback.answer("❌ طريقة الدفع غير موجودة", show_alert=True)
-        return
-    
-    method_name = method['name']
-    
-    # محاولة الحذف
-    success = await db_manager.soft_delete_payment_method(method_id)
-    
-    if success:
-        # تسجيل العملية
-        await db_manager.log_admin_action(
-            admin_id=callback.from_user.id,
-            action="DELETE_PAYMENT_METHOD",
-            target_type="PAYMENT_METHOD",
-            target_id=method_id,
-            details=f"حذف طريقة الدفع: {method_name}"
-        )
+    db = await db_manager.connect()
+    try:
+        # التحقق من وجود طلبات
+        cursor = await db.execute("SELECT COUNT(*) as count FROM orders WHERE payment_method_id = ?", (method_id,))
+        count = (await cursor.fetchone())['count']
         
-        await callback.answer(f"✅ تم حذف طريقة الدفع: {method_name}", show_alert=True)
+        if count == 0:
+            # حذف نهائي إذا لم توجد طلبات
+            await db.execute("DELETE FROM payment_methods WHERE id = ?", (method_id,))
+            await db.commit()
+            details = "حذف نهائي (لا توجد طلبات مرتبطة)"
+        else:
+            # Soft Delete إذا وجدت طلبات
+            await db.execute("UPDATE payment_methods SET deleted_at = CURRENT_TIMESTAMP, is_active = 0 WHERE id = ?", (method_id,))
+            await db.commit()
+            details = "حذف آمن (Soft Delete - توجد طلبات مرتبطة سابقة)"
+            
+        await callback.answer("✅ تم حذف طريقة الدفع")
+        await db_manager.log_admin_action(callback.from_user.id, "DELETE_PAYMENT_METHOD", "PAYMENT_METHOD", method_id, details)
         
         # العودة لقائمة طرق الدفع
         methods = await db_manager.get_payment_methods(only_active=False)
@@ -336,12 +334,9 @@ async def admin_delete_pay_execute(callback: types.CallbackQuery, is_operator: b
             reply_markup=get_payment_methods_keyboard(methods, is_admin=True), 
             parse_mode="Markdown"
         )
-    else:
-        await callback.answer(
-            "❌ لا يمكن حذف طريقة الدفع لوجود طلبات نشطة مرتبطة بها.\n"
-            "يرجى إكمال أو إلغاء الطلبات أولاً.",
-            show_alert=True
-        )
+    except Exception as e:
+        logger.error(f"Error deleting payment method: {e}")
+        await callback.answer("❌ حدث خطأ أثناء الحذف", show_alert=True)
 
 
 # ===== معالجة عمليات الشحن (Deposit Approval) =====
@@ -353,6 +348,11 @@ async def admin_approve_payment(callback: types.CallbackQuery, bot: Bot, is_oper
         return
     
     parts = callback.data.split("_")
+    # التأكد من طول الأجزاء لتجنب IndexError
+    if len(parts) < 5:
+        await callback.answer("⚠️ بيانات غير مكتملة في الزر", show_alert=True)
+        return
+        
     user_id, amount = int(parts[3]), float(parts[4])
     
     success, new_bal = await db_manager.update_user_balance(

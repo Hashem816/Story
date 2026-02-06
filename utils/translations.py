@@ -259,6 +259,22 @@ TRANSLATIONS = {
         "ar": "🎟️ استخدام كوبون",
         "en": "🎟️ Use Coupon"
     },
+    "btn_currency": {
+        "ar": "💵 تغيير العملة",
+        "en": "💵 Change Currency"
+    },
+    "btn_back": {
+        "ar": "🔙 عودة",
+        "en": "🔙 Back"
+    },
+    "btn_cancel": {
+        "ar": "❌ إلغاء",
+        "en": "❌ Cancel"
+    },
+    "select_currency": {
+        "ar": "💵 اختر العملة التي تفضل عرض الأسعار بها:",
+        "en": "💵 Choose your preferred currency to display prices:"
+    },
     "coupon_prompt": {
         "ar": "🎟️ يرجى إدخال رمز الكوبون:",
         "en": "🎟️ Please enter the coupon code:"
