@@ -33,7 +33,7 @@ from config.settings import BOT_TOKEN
 from database.manager import db_manager
 from middlewares.auth import AdminMiddleware, AuthMiddleware
 from middlewares.throttling import ThrottlingMiddleware
-from handlers import user, admin, products, admin_modes, admin_orders, admin_stats, admin_broadcast, payments
+from handlers import user, admin, products, admin_modes, admin_orders, admin_stats, admin_broadcast, admin_coupons, admin_audit, language, payments
 
 async def main():
     logging.basicConfig(
@@ -67,6 +67,9 @@ async def main():
     dp.include_router(admin_orders.router)
     dp.include_router(admin_stats.router)
     dp.include_router(admin_broadcast.router)
+    dp.include_router(admin_coupons.router)
+    dp.include_router(admin_audit.router)
+    dp.include_router(language.router)
     dp.include_router(payments.router)
     dp.include_router(user.router)
 

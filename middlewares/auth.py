@@ -3,6 +3,9 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery
 from config.settings import ADMIN_ID, StoreMode, UserRole
 from database.manager import db_manager
+import logging
+
+logger = logging.getLogger(__name__)
 
 class AdminMiddleware(BaseMiddleware):
     async def __call__(
@@ -26,11 +29,23 @@ class AdminMiddleware(BaseMiddleware):
         
         if isinstance(event, CallbackQuery):
             if event.data.startswith('admin_') and not is_support:
+                # تسجيل محاولة الوصول غير المصرح بها
+                logger.warning(f"Unauthorized admin access attempt by user {user_id}: {event.data}")
+                await db_manager.log_admin_action(
+                    admin_id=user_id,
+                    action="UNAUTHORIZED_ACCESS_ATTEMPT",
+                    details=f"Callback: {event.data}"
+                )
                 return await event.answer("⚠️ غير مصرح لك بهذا الإجراء.", show_alert=True)
             
             # حماية إجراءات معينة للـ Super Admin فقط
-            super_only = ['admin_set_mode_', 'admin_toggle_emergency', 'admin_set_rate', 'admin_users']
+            super_only = [
+                'admin_set_mode_', 'admin_toggle_emergency', 'admin_set_rate',
+                'admin_users_manage', 'admin_user_setrole_', 'admin_coupons',
+                'admin_coupon_', 'admin_broadcast', 'admin_support_msg'
+            ]
             if any(event.data.startswith(prefix) for prefix in super_only) and not is_super_admin:
+                logger.warning(f"Super admin only action attempted by {user_id}: {event.data}")
                 return await event.answer("⚠️ هذا الإجراء متاح لمدير النظام فقط.", show_alert=True)
         
         return await handler(event, data)
@@ -48,7 +63,15 @@ class AuthMiddleware(BaseMiddleware):
         user = await db_manager.get_user(user_id)
         if not user:
             role = UserRole.SUPER_ADMIN if user_id == ADMIN_ID else UserRole.USER
-            await db_manager.create_user(user_id, event.from_user.username or "Unknown", role=role)
+            first_name = event.from_user.first_name if hasattr(event.from_user, 'first_name') else None
+            last_name = event.from_user.last_name if hasattr(event.from_user, 'last_name') else None
+            await db_manager.create_user(
+                user_id,
+                event.from_user.username or "Unknown",
+                first_name=first_name,
+                last_name=last_name,
+                role=role
+            )
             user = await db_manager.get_user(user_id)
             
         is_admin_staff = user['role'] in [UserRole.SUPER_ADMIN, UserRole.OPERATOR, UserRole.SUPPORT]

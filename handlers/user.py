@@ -1,10 +1,13 @@
-from aiogram import Router, F, types, Bot
+from aiogram import Router, F, types
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database.manager import db_manager
 from utils.keyboards import get_main_menu, get_categories_keyboard, get_products_keyboard, get_order_confirm_keyboard
+from utils.translations import get_text, get_user_language
 from config.settings import OrderStatus, UserRole
+from aiogram.types import InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 router = Router()
 
@@ -18,9 +21,25 @@ class RechargeProcess(StatesGroup):
     waiting_for_receipt = State()
 
 @router.message(CommandStart())
-async def cmd_start(message: types.Message, user_role: str):
+async def cmd_start(message: types.Message, user_role: str, user: dict):
+    """رسالة الترحيب مع اختيار اللغة للمستخدمين الجدد"""
+    lang = get_user_language(user)
+    
+    # إذا كان المستخدم جديد، عرض اختيار اللغة
+    if not user.get('language'):
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="🇸🇦 العربية", callback_data="lang_ar"),
+            InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en")
+        )
+        return await message.answer(
+            get_text("welcome", "ar"),
+            reply_markup=builder.as_markup(),
+            parse_mode="Markdown"
+        )
+    
     await message.answer(
-        "👋 أهلاً بك في متجرنا الرقمي!\n\nاستخدم الأزرار أدناه للتنقل.",
+        get_text("welcome", lang),
         reply_markup=get_main_menu(user_role)
     )
 

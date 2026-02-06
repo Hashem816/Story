@@ -29,8 +29,10 @@ def get_admin_main_menu(user_role: str):
         builder.row(InlineKeyboardButton(text="🔌 وضع التشغيل", callback_data="admin_store_status"))
         builder.row(InlineKeyboardButton(text="💵 سعر الدولار", callback_data="admin_dollar_settings"))
         builder.row(InlineKeyboardButton(text="👤 إدارة المستخدمين", callback_data="admin_users_manage"))
+        builder.row(InlineKeyboardButton(text="🎟️ إدارة الكوبونات", callback_data="admin_coupons"))
         builder.row(InlineKeyboardButton(text="📊 الإحصائيات", callback_data="admin_stats"))
         builder.row(InlineKeyboardButton(text="📢 رسالة جماعية", callback_data="admin_broadcast"))
+        builder.row(InlineKeyboardButton(text="📋 سجل العمليات", callback_data="admin_audit_logs"))
         builder.row(InlineKeyboardButton(text="❓ إعداد رسالة الدعم", callback_data="admin_support_msg"))
         
     return builder.as_markup()

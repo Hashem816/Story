@@ -4,6 +4,7 @@ from aiogram import Router, F, types, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database.manager import db_manager
+from utils.translations import get_text, get_user_language
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -13,60 +14,89 @@ class BroadcastStates(StatesGroup):
     confirming = State()
 
 @router.callback_query(F.data == "admin_broadcast")
-async def start_broadcast(callback: types.CallbackQuery, state: FSMContext, is_admin: bool):
+async def start_broadcast(callback: types.CallbackQuery, state: FSMContext, is_admin: bool, user: dict):
     if not is_admin: return
+    lang = get_user_language(user)
     await state.set_state(BroadcastStates.waiting_for_message)
     await callback.message.edit_text(
-        "📢 *نظام البث الجماعي*\n\nيرجى إرسال الرسالة التي ترغب في بثها لجميع المستخدمين.\nيمكنك إرسال (نص، صورة، فيديو، أو منشور كامل):",
-        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_main")]]),
+        get_text("broadcast_start", lang),
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text=get_text("btn_cancel", lang), callback_data="admin_main")]]),
         parse_mode="Markdown"
     )
 
 @router.message(BroadcastStates.waiting_for_message)
-async def confirm_broadcast(message: types.Message, state: FSMContext):
-    await state.update_data(broadcast_msg_id=message.message_id, from_chat_id=message.chat.id)
+async def confirm_broadcast(message: types.Message, state: FSMContext, user: dict):
+    lang = get_user_language(user)
+    await state.update_data(broadcast_msg_id=message.message_id, from_chat_id=message.chat.id, message_text=message.text or "[media]")
     await state.set_state(BroadcastStates.confirming)
     
     builder = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="✅ تأكيد الإرسال", callback_data="broadcast_confirm")],
-        [types.InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_main")]
+        [types.InlineKeyboardButton(text=get_text("btn_confirm", lang), callback_data="broadcast_confirm")],
+        [types.InlineKeyboardButton(text=get_text("btn_cancel", lang), callback_data="admin_main")]
     ])
     
-    await message.answer("⚠️ *هل أنت متأكد؟*\nسيتم بث هذا المنشور لجميع المشتركين في البوت.", reply_markup=builder, parse_mode="Markdown")
+    await message.answer(get_text("broadcast_confirm", lang), reply_markup=builder, parse_mode="Markdown")
 
 @router.callback_query(F.data == "broadcast_confirm", BroadcastStates.confirming)
-async def execute_broadcast(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+async def execute_broadcast(callback: types.CallbackQuery, state: FSMContext, bot: Bot, user: dict):
+    lang = get_user_language(user)
     data = await state.get_data()
     msg_id = data.get('broadcast_msg_id')
     from_chat = data.get('from_chat_id')
+    message_text = data.get('message_text', '')
     
     if not msg_id or not from_chat:
         await callback.answer("❌ حدث خطأ في استعادة الرسالة.")
         return
 
-    db = await db_manager.connect()
-    cursor = await db.execute("SELECT telegram_id FROM users")
-    users = [row['telegram_id'] for row in await cursor.fetchall()]
+    # جلب المستخدمين النشطين فقط
+    users = await db_manager.get_active_users()
     
-    await callback.message.edit_text(f"⏳ بدأ البث لـ {len(users)} مستخدم...")
+    await callback.message.edit_text(get_text("broadcast_started", lang, count=len(users)))
     
     success_count = 0
     fail_count = 0
+    batch_size = 20  # إرسال على دفعات
     
-    for user_id in users:
-        try:
-            await bot.copy_message(chat_id=user_id, from_chat_id=from_chat, message_id=msg_id)
-            success_count += 1
-            await asyncio.sleep(0.05) # تفادي قيود تيليجرام
-        except Exception as e:
-            logger.error(f"Failed to broadcast to {user_id}: {e}")
-            fail_count += 1
-            
+    for i in range(0, len(users), batch_size):
+        batch = users[i:i+batch_size]
+        for user_id in batch:
+            try:
+                await bot.copy_message(chat_id=user_id, from_chat_id=from_chat, message_id=msg_id)
+                success_count += 1
+                await asyncio.sleep(0.05)  # تفادي قيود تيليجرام
+            except Exception as e:
+                logger.error(f"Failed to broadcast to {user_id}: {e}")
+                fail_count += 1
+        
+        # تحديث التقدم
+        if i + batch_size < len(users):
+            try:
+                await callback.message.edit_text(
+                    f"⏳ جاري البث... {i+batch_size}/{len(users)}\n"
+                    f"✅ نجح: {success_count} | ❌ فشل: {fail_count}"
+                )
+            except:
+                pass
+    
+    # حفظ سجل البث
+    await db_manager.save_broadcast(
+        admin_id=callback.from_user.id,
+        message_text=message_text[:200],  # أول 200 حرف
+        target_count=len(users),
+        success_count=success_count,
+        fail_count=fail_count
+    )
+    
+    # تسجيل العملية
+    await db_manager.log_admin_action(
+        admin_id=callback.from_user.id,
+        action="BROADCAST_SENT",
+        details=f"بث جماعي: {success_count}/{len(users)}"
+    )
+    
     await callback.message.answer(
-        f"✅ *اكتمل البث الجماعي*\n\n"
-        f"📊 التقرير:\n"
-        f"🔹 تم الإرسال بنجاح: `{success_count}`\n"
-        f"🔸 فشل الإرسال: `{fail_count}`",
+        get_text("broadcast_complete", lang, success=success_count, fail=fail_count),
         parse_mode="Markdown"
     )
     await state.clear()
