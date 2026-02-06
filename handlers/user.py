@@ -7,7 +7,7 @@
 """
 
 from aiogram import Router, F, types, Bot
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database.manager import db_manager
