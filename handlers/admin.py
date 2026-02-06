@@ -36,7 +36,7 @@ async def admin_panel(message: types.Message, is_support: bool, user_role: str, 
     
     await message.answer(
         get_text("admin_panel_title", lang),
-        reply_markup=get_admin_main_menu(user_role),
+        reply_markup=get_admin_main_menu(user_role, lang),
         parse_mode="Markdown"
     )
     
@@ -516,6 +516,10 @@ async def admin_user_role_finish(callback: types.CallbackQuery, is_admin: bool, 
     await db_manager.update_user_role(user_id, new_role)
     await callback.answer(f"✅ تم تغيير الرتبة إلى {new_role}")
     
+    # إشعار المستخدم
+    from utils.notifications import notification_manager
+    await notification_manager.notify_user(callback.bot, user_id, f"🎖 تم تغيير رتبتك إلى: {new_role}\nيرجى الضغط على /start لتحديث القوائم.")
+    
     # تسجيل العملية
     await db_manager.log_admin_action(
         admin_id=callback.from_user.id,
@@ -564,7 +568,7 @@ async def admin_support_msg_save(message: types.Message, state: FSMContext, is_a
     await message.answer(get_text("success_updated", lang))
     await message.answer(
         get_text("admin_panel_title", lang),
-        reply_markup=get_admin_main_menu(user_role),
+        reply_markup=get_admin_main_menu(user_role, lang),
         parse_mode="Markdown"
     )
     

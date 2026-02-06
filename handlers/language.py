@@ -49,7 +49,8 @@ async def set_language(callback: types.CallbackQuery, user: dict):
     from utils.keyboards import get_main_menu
     user_role = user.get('role', 'USER')
     
+    await callback.message.delete()
     await callback.message.answer(
         get_text("main_menu", lang),
-        reply_markup=get_main_menu(user_role)
+        reply_markup=get_main_menu(user_role, lang)
     )

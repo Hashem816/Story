@@ -2,36 +2,47 @@ from aiogram.types import KeyboardButton, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from config.settings import UserRole
 
-def get_main_menu(user_role: str = UserRole.USER):
+from utils.translations import get_text
+
+def get_main_menu(user_role: str = UserRole.USER, lang: str = "ar"):
     builder = ReplyKeyboardBuilder()
-    builder.row(KeyboardButton(text="🛒 المتجر"), KeyboardButton(text="👤 حسابي"))
-    builder.row(KeyboardButton(text="📦 طلباتي"), KeyboardButton(text="💰 شحن رصيد"))
-    builder.row(KeyboardButton(text="❓ الدعم"))
+    builder.row(
+        KeyboardButton(text=get_text("btn_store", lang)), 
+        KeyboardButton(text=get_text("btn_account", lang))
+    )
+    builder.row(
+        KeyboardButton(text=get_text("btn_orders", lang)), 
+        KeyboardButton(text=get_text("btn_balance", lang))
+    )
+    builder.row(
+        KeyboardButton(text=get_text("btn_support", lang)),
+        KeyboardButton(text="🌐 Language / اللغة")
+    )
     
     if user_role in [UserRole.SUPER_ADMIN, UserRole.OPERATOR, UserRole.SUPPORT]:
-        builder.row(KeyboardButton(text="⚙️ لوحة التحكم"))
+        builder.row(KeyboardButton(text=get_text("btn_admin_panel", lang)))
         
     return builder.as_markup(resize_keyboard=True)
 
-def get_admin_main_menu(user_role: str):
+def get_admin_main_menu(user_role: str, lang: str = "ar"):
     builder = InlineKeyboardBuilder()
     
     # الطلبات (الكل)
-    builder.row(InlineKeyboardButton(text="📦 الطلبات النشطة", callback_data="admin_orders"))
+    builder.row(InlineKeyboardButton(text=get_text("admin_orders", lang), callback_data="admin_orders"))
     
     # إدارة المنتجات والدفع (Operator + Super Admin)
     if user_role in [UserRole.SUPER_ADMIN, UserRole.OPERATOR]:
-        builder.row(InlineKeyboardButton(text="🛒 إدارة المنتجات", callback_data="admin_products"))
+        builder.row(InlineKeyboardButton(text=get_text("admin_products", lang), callback_data="admin_products"))
         builder.row(InlineKeyboardButton(text="💳 طرق الدفع", callback_data="admin_payment_methods"))
     
     # الإعدادات المتقدمة (Super Admin فقط)
     if user_role == UserRole.SUPER_ADMIN:
         builder.row(InlineKeyboardButton(text="🔌 وضع التشغيل", callback_data="admin_store_status"))
         builder.row(InlineKeyboardButton(text="💵 سعر الدولار", callback_data="admin_dollar_settings"))
-        builder.row(InlineKeyboardButton(text="👤 إدارة المستخدمين", callback_data="admin_users_manage"))
-        builder.row(InlineKeyboardButton(text="🎟️ إدارة الكوبونات", callback_data="admin_coupons"))
-        builder.row(InlineKeyboardButton(text="📊 الإحصائيات", callback_data="admin_stats"))
-        builder.row(InlineKeyboardButton(text="📢 رسالة جماعية", callback_data="admin_broadcast"))
+        builder.row(InlineKeyboardButton(text=get_text("admin_users", lang), callback_data="admin_users_manage"))
+        builder.row(InlineKeyboardButton(text=get_text("admin_coupons", lang), callback_data="admin_coupons"))
+        builder.row(InlineKeyboardButton(text=get_text("admin_stats", lang), callback_data="admin_stats"))
+        builder.row(InlineKeyboardButton(text=get_text("admin_broadcast", lang), callback_data="admin_broadcast"))
         builder.row(InlineKeyboardButton(text="📋 سجل العمليات", callback_data="admin_audit_logs"))
         builder.row(InlineKeyboardButton(text="❓ إعداد رسالة الدعم", callback_data="admin_support_msg"))
         

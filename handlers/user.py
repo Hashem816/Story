@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database.manager import db_manager
 from utils.keyboards import get_main_menu, get_categories_keyboard, get_products_keyboard, get_order_confirm_keyboard
-from utils.translations import get_text, get_user_language
+from utils.translations import get_text, get_user_language, TRANSLATIONS
 from config.settings import OrderStatus, UserRole
 from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -40,15 +40,16 @@ async def cmd_start(message: types.Message, user_role: str, user: dict):
     
     await message.answer(
         get_text("welcome", lang),
-        reply_markup=get_main_menu(user_role)
+        reply_markup=get_main_menu(user_role, lang)
     )
 
-@router.message(F.text == "🛒 المتجر")
+@router.message(F.text.in_(["🛒 المتجر", "🛒 Store"]))
 async def show_categories(message: types.Message, user: dict):
+    lang = get_user_language(user)
     if await db_manager.has_open_order(user['telegram_id']):
-        return await message.answer("⚠️ لديك طلب مفتوح بالفعل، يرجى انتظاره.")
+        return await message.answer(get_text("error_open_order", lang) if "error_open_order" in TRANSLATIONS else "⚠️ لديك طلب مفتوح بالفعل، يرجى انتظاره.")
     categories = await db_manager.get_categories()
-    await message.answer("📁 اختر القسم:", reply_markup=get_categories_keyboard(categories))
+    await message.answer(get_text("choose_category", lang) if "choose_category" in TRANSLATIONS else "📁 اختر القسم:", reply_markup=get_categories_keyboard(categories))
 
 @router.callback_query(F.data == "back_to_categories")
 async def back_to_categories(callback: types.CallbackQuery):
@@ -141,7 +142,7 @@ async def confirm_purchase(callback: types.CallbackQuery, state: FSMContext, use
     await state.clear()
 
 # --- شحن الرصيد ---
-@router.message(F.text == "💰 شحن رصيد")
+@router.message(F.text.in_(["💰 شحن رصيد", "💰 Add Balance"]))
 @router.callback_query(F.data == "user_recharge_start")
 async def start_recharge(event, state: FSMContext):
     methods = await db_manager.get_payment_methods()
@@ -210,19 +211,19 @@ async def recharge_receipt(message: types.Message, state: FSMContext, bot: Bot):
     await message.answer("⏳ تم إرسال طلب الشحن للإدارة. سيتم إخطارك فور تأكيد الطلب.")
     await state.clear()
 
-@router.message(F.text == "❓ الدعم")
+@router.message(F.text.in_(["❓ الدعم", "❓ Support"]))
 async def show_support(message: types.Message):
     support_msg = await db_manager.get_setting("support_message", "تواصل مع الدعم الفني.")
     await message.answer(f"❓ *الدعم الفني*\n\n{support_msg}", parse_mode="Markdown")
 
-@router.message(F.text == "👤 حسابي")
+@router.message(F.text.in_(["👤 حسابي", "👤 My Account"]))
 async def show_account(message: types.Message, user: dict):
     await message.answer(
         f"👤 *معلومات الحساب*\n\n🆔 معرفك: `{user['telegram_id']}`\n💰 الرصيد: `{user['balance']:.2f}$`",
         parse_mode="Markdown"
     )
 
-@router.message(F.text == "📦 طلباتي")
+@router.message(F.text.in_(["📦 طلباتي", "📦 My Orders"]))
 async def show_my_orders(message: types.Message, user: dict):
     db = await db_manager.connect()
     cursor = await db.execute("""
@@ -240,3 +241,12 @@ async def show_my_orders(message: types.Message, user: dict):
     for ord in orders:
         text += f"🔹 #{ord['id']} | {ord['name']}\n📍 الحالة: `{ord['status']}`\n💰 السعر: {ord['price_local']:,.0f} ل.س\n\n"
     await message.answer(text, parse_mode="Markdown")
+
+@router.message(F.text == "🌐 Language / اللغة")
+async def change_language_start(message: types.Message):
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🇸🇦 العربية", callback_data="lang_ar"),
+        InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en")
+    )
+    await message.answer("🌐 اختر لغتك المفضلة / Choose your language:", reply_markup=builder.as_markup())

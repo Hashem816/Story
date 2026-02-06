@@ -1,6 +1,7 @@
 from aiogram import Router, F, types, Bot
 from database.manager import db_manager
 from utils.keyboards import get_admin_order_actions
+from utils.translations import get_text, get_user_language
 from config.settings import OrderStatus, UserRole
 
 router = Router()
@@ -60,7 +61,9 @@ async def approve_payment(callback: types.CallbackQuery, is_operator: bool, bot:
     await db_manager.update_order_status(order_id, OrderStatus.IN_PROGRESS, operator_id=callback.from_user.id)
     await callback.answer("✅ تم تأكيد الإيصال. الطلب الآن قيد التنفيذ.")
     
-    await bot.send_message(order['telegram_id'], f"✅ تم تأكيد إيصال الدفع للطلب `#{order_id}`.\nجاري تنفيذ طلبك الآن...")
+    user_data = await db_manager.get_user(order['telegram_id'])
+    lang = get_user_language(user_data)
+    await bot.send_message(order['telegram_id'], f"✅ تم تأكيد إيصال الدفع للطلب `#{order_id}`.\nجاري تنفيذ طلبك الآن..." if lang == "ar" else f"✅ Payment receipt confirmed for order `#{order_id}`.\nYour order is being processed...")
     await list_active_orders(callback, is_operator)
 
 @router.callback_query(F.data.startswith("aord_reject_pay_"))
@@ -72,7 +75,9 @@ async def reject_payment(callback: types.CallbackQuery, is_operator: bool, bot: 
     await db_manager.update_order_status(order_id, OrderStatus.FAILED, admin_notes="تم رفض الإيصال")
     await callback.answer("❌ تم رفض الإيصال.")
     
-    await bot.send_message(order['telegram_id'], f"❌ عذراً، تم رفض إيصال الدفع للطلب `#{order_id}`. يرجى التواصل مع الدعم.")
+    user_data = await db_manager.get_user(order['telegram_id'])
+    lang = get_user_language(user_data)
+    await bot.send_message(order['telegram_id'], f"❌ عذراً، تم رفض إيصال الدفع للطلب `#{order_id}`. يرجى التواصل مع الدعم." if lang == "ar" else f"❌ Sorry, the payment receipt for order `#{order_id}` was rejected. Please contact support.")
     await list_active_orders(callback, is_operator)
 
 @router.callback_query(F.data.startswith("aord_complete_"))
@@ -84,7 +89,9 @@ async def complete_order(callback: types.CallbackQuery, is_operator: bool, bot: 
     await db_manager.update_order_status(order_id, OrderStatus.COMPLETED, execution_type="MANUAL", operator_id=callback.from_user.id)
     await callback.answer("✅ تم إكمال الطلب بنجاح.")
     
-    await bot.send_message(order['telegram_id'], f"✅ مبروك! تم تنفيذ طلبك `#{order_id}` بنجاح.\nشكراً لتعاملك معنا.")
+    user_data = await db_manager.get_user(order['telegram_id'])
+    lang = get_user_language(user_data)
+    await bot.send_message(order['telegram_id'], f"✅ مبروك! تم تنفيذ طلبك `#{order_id}` بنجاح.\nشكراً لتعاملك معنا." if lang == "ar" else f"✅ Congratulations! Your order `#{order_id}` has been successfully executed.\nThank you for choosing us.")
     await list_active_orders(callback, is_operator)
 
 @router.callback_query(F.data.startswith("aord_cancel_"))
@@ -96,5 +103,7 @@ async def cancel_order(callback: types.CallbackQuery, is_operator: bool, bot: Bo
     await db_manager.update_order_status(order_id, OrderStatus.CANCELED, operator_id=callback.from_user.id)
     await callback.answer("❌ تم إلغاء الطلب.")
     
-    await bot.send_message(order['telegram_id'], f"❌ نعتذر، تم إلغاء طلبك `#{order_id}`.")
+    user_data = await db_manager.get_user(order['telegram_id'])
+    lang = get_user_language(user_data)
+    await bot.send_message(order['telegram_id'], f"❌ نعتذر، تم إلغاء طلبك `#{order_id}`." if lang == "ar" else f"❌ Sorry, your order `#{order_id}` has been canceled.")
     await list_active_orders(callback, is_operator)
