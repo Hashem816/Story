@@ -123,7 +123,8 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     description TEXT,
-    is_active INTEGER DEFAULT 1
+    is_active INTEGER DEFAULT 1,
+    deleted_at DATETIME DEFAULT NULL
 );
 """
 
