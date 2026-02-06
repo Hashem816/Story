@@ -14,6 +14,7 @@ router = Router()
 class OrderProcess(StatesGroup):
     waiting_for_player_id = State()
     confirming = State()
+    waiting_for_coupon = State()
     waiting_for_receipt = State()
 
 class RechargeProcess(StatesGroup):
@@ -96,7 +97,52 @@ async def process_player_id(message: types.Message, state: FSMContext):
         f"💰 السعر: {data['price_local']:,.0f} ل.س\n\n"
         f"سيتم الخصم من رصيدك الداخلي عند التأكيد."
     )
-    await message.answer(text, reply_markup=get_order_confirm_keyboard(product['id']), parse_mode="Markdown")
+    lang = get_user_language(user)
+    await message.answer(text, reply_markup=get_order_confirm_keyboard(product['id'], lang), parse_mode="Markdown")
+
+@router.callback_query(F.data.startswith("use_coupon_"))
+async def use_coupon_start(callback: types.CallbackQuery, state: FSMContext, user: dict):
+    lang = get_user_language(user)
+    await state.set_state(OrderProcess.waiting_for_coupon)
+    await callback.message.edit_text(get_text("coupon_prompt", lang))
+
+@router.message(OrderProcess.waiting_for_coupon)
+async def process_coupon(message: types.Message, state: FSMContext, user: dict):
+    lang = get_user_language(user)
+    coupon_code = message.text.strip().upper()
+    data = await state.get_data()
+    
+    coupon = await db_manager.get_coupon(coupon_code)
+    if not coupon or not coupon['is_active']:
+        return await message.answer(get_text("coupon_invalid", lang))
+    
+    # التحقق من الحد الأدنى
+    if data['price_usd'] < coupon['min_amount']:
+        return await message.answer(get_text("min_amount_error", lang, min=coupon['min_amount']))
+    
+    # حساب الخصم
+    discount = 0
+    if coupon['type'] == 'PERCENTAGE':
+        discount = (data['price_usd'] * coupon['value']) / 100
+    else:
+        discount = coupon['value']
+    
+    new_price_usd = max(0, data['price_usd'] - discount)
+    new_price_local = new_price_usd * data['rate']
+    
+    await state.update_data(price_usd=new_price_usd, price_local=new_price_local, coupon_code=coupon_code, discount_amount=discount)
+    await state.set_state(OrderProcess.confirming)
+    
+    product = await db_manager.get_product(data['selected_prod_id'])
+    text = (
+        f"✅ {get_text('coupon_applied', lang, discount=f'{discount:.2f}$')}\n\n"
+        f"⚠️ *تأكيد الطلب (بعد الخصم)*\n\n"
+        f"📦 المنتج: {product['name']}\n"
+        f"🆔 المعرف: `{data['player_id']}`\n"
+        f"💰 السعر الجديد: {new_price_local:,.0f} ل.س ({new_price_usd:.2f}$)\n\n"
+        f"سيتم الخصم من رصيدك الداخلي عند التأكيد."
+    )
+    await message.answer(text, reply_markup=get_order_confirm_keyboard(product['id'], lang), parse_mode="Markdown")
 
 @router.callback_query(F.data.startswith("confirm_buy_"))
 async def confirm_purchase(callback: types.CallbackQuery, state: FSMContext, user: dict, bot: Bot):
@@ -115,11 +161,18 @@ async def confirm_purchase(callback: types.CallbackQuery, state: FSMContext, use
     success, result = await db_manager.update_user_balance(user['telegram_id'], -data['price_usd'], "PURCHASE", reason=f"شراء منتج: {data['selected_prod_id']}")
     
     if success:
+        coupon_code = data.get('coupon_code')
         order_id = await db_manager.create_order(
             user['telegram_id'], data['selected_prod_id'], data['player_id'], 
             data['price_usd'], data['price_local'], data['rate'], 
             status=OrderStatus.IN_PROGRESS # مدفوع وجاري التنفيذ
         )
+        
+        # إذا تم استخدام كوبون، تسجيل الاستخدام
+        if coupon_code:
+            # حساب الخصم مرة أخرى للتسجيل
+            discount_amount = data.get('discount_amount', 0)
+            await db_manager.use_coupon(coupon_code, user['telegram_id'], order_id, discount_amount)
         
         await callback.message.edit_text(f"✅ تم الدفع بنجاح من رصيدك!\n📦 رقم الطلب: `#{order_id}`\nجاري التنفيذ الآن...")
         

@@ -19,7 +19,9 @@ def get_main_menu(user_role: str = UserRole.USER, lang: str = "ar"):
         KeyboardButton(text="🌐 Language / اللغة")
     )
     
-    if user_role in [UserRole.SUPER_ADMIN, UserRole.OPERATOR, UserRole.SUPPORT]:
+    # التحقق من الرتبة لظهور لوحة التحكم
+    is_staff = user_role in [UserRole.SUPER_ADMIN, UserRole.OPERATOR, UserRole.SUPPORT]
+    if is_staff:
         builder.row(KeyboardButton(text=get_text("btn_admin_panel", lang)))
         
     return builder.as_markup(resize_keyboard=True)
@@ -98,10 +100,13 @@ def get_admin_order_actions(order_id: int, status: str):
     builder.row(InlineKeyboardButton(text="🔙 عودة", callback_data="admin_orders"))
     return builder.as_markup()
 
-def get_order_confirm_keyboard(product_id):
+def get_order_confirm_keyboard(product_id, lang: str = "ar"):
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="✅ تأكيد الشراء (من الرصيد)", callback_data=f"confirm_buy_{product_id}"),
-        InlineKeyboardButton(text="❌ إلغاء", callback_data="back_to_categories")
+        InlineKeyboardButton(text=get_text("btn_confirm_buy", lang) if "btn_confirm_buy" in TRANSLATIONS else "✅ تأكيد الشراء", callback_data=f"confirm_buy_{product_id}"),
+        InlineKeyboardButton(text=get_text("btn_use_coupon", lang) if "btn_use_coupon" in TRANSLATIONS else "🎟️ استخدام كوبون", callback_data=f"use_coupon_{product_id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text=get_text("btn_cancel", lang), callback_data="back_to_categories")
     )
     return builder.as_markup()

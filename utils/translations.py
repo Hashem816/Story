@@ -251,6 +251,30 @@ TRANSLATIONS = {
         "ar": "❌ إلغاء",
         "en": "❌ Cancel"
     },
+    "btn_confirm_buy": {
+        "ar": "✅ تأكيد الشراء",
+        "en": "✅ Confirm Purchase"
+    },
+    "btn_use_coupon": {
+        "ar": "🎟️ استخدام كوبون",
+        "en": "🎟️ Use Coupon"
+    },
+    "coupon_prompt": {
+        "ar": "🎟️ يرجى إدخال رمز الكوبون:",
+        "en": "🎟️ Please enter the coupon code:"
+    },
+    "coupon_invalid": {
+        "ar": "❌ الكوبون غير صحيح أو منتهي الصلاحية.",
+        "en": "❌ Invalid or expired coupon."
+    },
+    "coupon_applied": {
+        "ar": "✅ تم تطبيق الكوبون! خصم: {discount}",
+        "en": "✅ Coupon applied! Discount: {discount}"
+    },
+    "min_amount_error": {
+        "ar": "⚠️ هذا الكوبون يتطلب حد أدنى للشراء: {min}$",
+        "en": "⚠️ This coupon requires a minimum purchase: {min}$"
+    },
     "btn_next": {
         "ar": "⏭ التالي",
         "en": "⏭ Next"
