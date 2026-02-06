@@ -84,12 +84,13 @@ async def product_details(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(text, parse_mode="Markdown")
 
 @router.message(OrderProcess.waiting_for_player_id)
-async def process_player_id(message: types.Message, state: FSMContext):
+async def process_player_id(message: types.Message, state: FSMContext, user: dict):
     await state.update_data(player_id=message.text)
     await state.set_state(OrderProcess.confirming)
     data = await state.get_data()
     product = await db_manager.get_product(data['selected_prod_id'])
     
+    lang = get_user_language(user)
     text = (
         f"⚠️ *تأكيد الطلب*\n\n"
         f"📦 المنتج: {product['name']}\n"
@@ -97,7 +98,6 @@ async def process_player_id(message: types.Message, state: FSMContext):
         f"💰 السعر: {data['price_local']:,.0f} ل.س\n\n"
         f"سيتم الخصم من رصيدك الداخلي عند التأكيد."
     )
-    lang = get_user_language(user)
     await message.answer(text, reply_markup=get_order_confirm_keyboard(product['id'], lang), parse_mode="Markdown")
 
 @router.callback_query(F.data.startswith("use_coupon_"))

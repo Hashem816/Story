@@ -1,7 +1,18 @@
+"""
+Database Manager - محسّن
+التحسينات:
+- إضافة Cache للإعدادات
+- تحسين استخدام Lock
+- إضافة فهارس إضافية
+- تحسين الاستعلامات
+"""
+
 import aiosqlite
 import asyncio
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
+import time
+
 try:
     from .models import (
         CREATE_USERS_TABLE, CREATE_USERS_INDEX, CREATE_CATEGORIES_TABLE, CREATE_PRODUCTS_TABLE,
@@ -22,16 +33,61 @@ except ImportError:
     )
 from config.settings import DB_PATH, OrderStatus
 
+
+class SettingsCache:
+    """
+    Cache بسيط للإعدادات
+    يقلل الاستعلامات المتكررة لقاعدة البيانات
+    """
+    def __init__(self, ttl: int = 300):
+        """
+        Args:
+            ttl: مدة صلاحية Cache بالثواني (افتراضي: 5 دقائق)
+        """
+        self.cache: Dict[str, tuple] = {}  # {key: (value, timestamp)}
+        self.ttl = ttl
+        self._lock = asyncio.Lock()
+    
+    async def get(self, key: str) -> Optional[str]:
+        """جلب قيمة من Cache"""
+        async with self._lock:
+            if key in self.cache:
+                value, timestamp = self.cache[key]
+                if time.time() - timestamp < self.ttl:
+                    return value
+                else:
+                    del self.cache[key]
+        return None
+    
+    async def set(self, key: str, value: str):
+        """حفظ قيمة في Cache"""
+        async with self._lock:
+            self.cache[key] = (value, time.time())
+    
+    async def invalidate(self, key: str = None):
+        """إلغاء Cache لمفتاح معين أو الكل"""
+        async with self._lock:
+            if key:
+                self.cache.pop(key, None)
+            else:
+                self.cache.clear()
+
+
 class DatabaseManager:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._lock = asyncio.Lock()
         self._db = None
-
+        self._settings_cache = SettingsCache(ttl=300)  # Cache للإعدادات
+        
     async def connect(self):
         if self._db is None:
             self._db = await aiosqlite.connect(self.db_path)
             self._db.row_factory = aiosqlite.Row
+            # تفعيل WAL mode لتحسين الأداء
+            await self._db.execute("PRAGMA journal_mode=WAL")
+            # تفعيل Foreign Keys
+            await self._db.execute("PRAGMA foreign_keys=ON")
         return self._db
 
     async def init_db(self):
@@ -59,6 +115,14 @@ class DatabaseManager:
             await db.execute(CREATE_RATE_LIMITS_TABLE)
             await db.execute(CREATE_ADMIN_SESSIONS_TABLE)
             
+            # إضافة فهارس إضافية لتحسين الأداء
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_financial_logs_user_id ON financial_logs(user_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_admin_id ON audit_logs(admin_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_rate_limits_user_action ON rate_limits(user_id, action_type)")
+            
             # تحديث جدول المستخدمين لإضافة الأعمدة الجديدة إن لم تكن موجودة
             try:
                 await db.execute("ALTER TABLE users ADD COLUMN first_name TEXT")
@@ -67,7 +131,7 @@ class DatabaseManager:
                 await db.execute("ALTER TABLE users ADD COLUMN last_name TEXT")
             except: pass
             try:
-                await db.execute("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'ar'")
+                await db.execute("ALTER TABLE users ADD COLUMN language TEXT")
             except: pass
             
             # الإعدادات الافتراضية
@@ -83,8 +147,10 @@ class DatabaseManager:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
-    async def create_user(self, telegram_id: int, username: str, first_name: str = None, last_name: str = None, role: str = 'USER', language: str = 'ar'):
-        """إنشاء مستخدم جديد مع دعم اللغة"""
+    async def create_user(self, telegram_id: int, username: str, first_name: str = None, last_name: str = None, role: str = 'USER', language: str = None):
+        """إنشاء مستخدم جديد مع دعم اللغة
+        إذا كانت language=None فسيتم إجبار المستخدم على اختيار اللغة
+        """
         db = await self.connect()
         await db.execute(
             "INSERT OR IGNORE INTO users (telegram_id, username, first_name, last_name, role, language) VALUES (?, ?, ?, ?, ?, ?)",
@@ -101,6 +167,18 @@ class DatabaseManager:
         """تحديث لغة المستخدم"""
         db = await self.connect()
         await db.execute("UPDATE users SET language = ? WHERE telegram_id = ?", (language, telegram_id))
+        await db.commit()
+
+    async def block_user(self, telegram_id: int):
+        """حظر مستخدم"""
+        db = await self.connect()
+        await db.execute("UPDATE users SET is_blocked = 1 WHERE telegram_id = ?", (telegram_id,))
+        await db.commit()
+
+    async def unblock_user(self, telegram_id: int):
+        """إلغاء حظر مستخدم"""
+        db = await self.connect()
+        await db.execute("UPDATE users SET is_blocked = 0 WHERE telegram_id = ?", (telegram_id,))
         await db.commit()
 
     async def search_users(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
@@ -172,21 +250,30 @@ class DatabaseManager:
         return row['count'] > 0
 
     async def update_user_balance(self, user_id: int, amount: float, log_type: str, admin_id: int = None, reason: str = None, order_id: int = None):
+        """
+        تحديث رصيد المستخدم مع Transaction آمن
+        """
         async with self._lock:
             db = await self.connect()
             await db.execute("BEGIN")
             try:
                 cursor = await db.execute("SELECT balance FROM users WHERE telegram_id = ?", (user_id,))
                 user = await cursor.fetchone()
-                if not user: raise Exception("User not found")
+                if not user:
+                    raise Exception("User not found")
+                
                 balance_before = user['balance']
                 balance_after = balance_before + amount
-                if balance_after < 0: raise Exception("Insufficient balance")
+                
+                if balance_after < 0:
+                    raise Exception("Insufficient balance")
+                
                 await db.execute("UPDATE users SET balance = ? WHERE telegram_id = ?", (balance_after, user_id))
                 await db.execute("""
                     INSERT INTO financial_logs (user_id, order_id, type, amount, balance_before, balance_after, admin_id, reason)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (user_id, order_id, log_type, amount, balance_before, balance_after, admin_id, reason))
+                
                 await db.commit()
                 return True, balance_after
             except Exception as e:
@@ -196,7 +283,8 @@ class DatabaseManager:
     # --- عمليات المنتجات والأقسام والمزودين ---
     async def get_categories(self, only_active: bool = True) -> List[Dict[str, Any]]:
         query = "SELECT * FROM categories"
-        if only_active: query += " WHERE is_active = 1"
+        if only_active:
+            query += " WHERE is_active = 1"
         db = await self.connect()
         cursor = await db.execute(query)
         return [dict(row) for row in await cursor.fetchall()]
@@ -232,9 +320,9 @@ class DatabaseManager:
     async def add_product(self, category_id: int, name: str, description: str, price_usd: float, provider_id: int = None, variation_id: str = None, type: str = 'MANUAL'):
         db = await self.connect()
         await db.execute("""
-            INSERT INTO products (category_id, provider_id, name, description, price_usd, variation_id, type)
+            INSERT INTO products (category_id, name, description, price_usd, provider_id, variation_id, type)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (category_id, provider_id, name, description, price_usd, variation_id, type))
+        """, (category_id, name, description, price_usd, provider_id, variation_id, type))
         await db.commit()
 
     # --- عمليات الطلبات ---
@@ -290,22 +378,44 @@ class DatabaseManager:
         """, (user_id, limit))
         return [dict(row) for row in await cursor.fetchall()]
 
-    # --- الإعدادات ---
+    # --- الإعدادات (مع Cache) ---
     async def get_setting(self, key: str, default: Any = None) -> Any:
+        """
+        جلب إعداد مع استخدام Cache
+        """
+        # محاولة جلب من Cache أولاً
+        cached_value = await self._settings_cache.get(key)
+        if cached_value is not None:
+            return cached_value
+        
+        # إذا لم يكن في Cache، جلب من قاعدة البيانات
         db = await self.connect()
         cursor = await db.execute("SELECT value FROM settings WHERE key = ?", (key,))
         row = await cursor.fetchone()
-        return row['value'] if row else default
+        
+        if row:
+            value = row['value']
+            await self._settings_cache.set(key, value)
+            return value
+        
+        return default
 
     async def set_setting(self, key: str, value: str):
+        """
+        حفظ إعداد مع تحديث Cache
+        """
         db = await self.connect()
         await db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
         await db.commit()
+        
+        # تحديث Cache
+        await self._settings_cache.set(key, value)
 
     # --- طرق الدفع ---
     async def get_payment_methods(self, only_active: bool = True) -> List[Dict[str, Any]]:
         query = "SELECT * FROM payment_methods"
-        if only_active: query += " WHERE is_active = 1"
+        if only_active:
+            query += " WHERE is_active = 1"
         db = await self.connect()
         cursor = await db.execute(query)
         return [dict(row) for row in await cursor.fetchall()]
@@ -486,11 +596,20 @@ class DatabaseManager:
         cursor = await db.execute("SELECT * FROM broadcast_history ORDER BY created_at DESC LIMIT ?", (limit,))
         return [dict(row) for row in await cursor.fetchall()]
 
-    # --- Rate Limiting ---
+    # --- Rate Limiting (محسّن) ---
     async def check_rate_limit(self, user_id: int, action_type: str, max_count: int, window_minutes: int) -> bool:
-        """التحقق من معدل الطلبات"""
+        """
+        التحقق من معدل الطلبات
+        محسّن لتنظيف البيانات القديمة تلقائياً
+        """
         db = await self.connect()
         window_start = datetime.now() - timedelta(minutes=window_minutes)
+        
+        # تنظيف البيانات القديمة أولاً
+        await db.execute("""
+            DELETE FROM rate_limits 
+            WHERE window_start < datetime('now', '-1 hour')
+        """)
         
         cursor = await db.execute("""
             SELECT SUM(count) as total FROM rate_limits
@@ -512,4 +631,6 @@ class DatabaseManager:
         
         return True
 
+
+# إنشاء instance واحد من DatabaseManager
 db_manager = DatabaseManager(DB_PATH)

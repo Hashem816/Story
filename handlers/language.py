@@ -30,13 +30,17 @@ async def show_language_selection(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("lang_"))
 async def set_language(callback: types.CallbackQuery, user: dict):
-    """تعيين لغة المستخدم"""
+    """
+    تعيين لغة المستخدم
+    يتم استدعاؤه عند أول تشغيل أو عند تغيير اللغة
+    """
     lang = callback.data.split("_")[1]
     
     # تحديث اللغة في قاعدة البيانات
     await db_manager.update_user_language(callback.from_user.id, lang)
     
     # تسجيل العملية
+    logger.info(f"User {callback.from_user.id} selected language: {lang}")
     await db_manager.log_admin_action(
         admin_id=callback.from_user.id,
         action="LANGUAGE_CHANGE",
@@ -45,11 +49,15 @@ async def set_language(callback: types.CallbackQuery, user: dict):
     
     await callback.answer(get_text("language_selected", lang), show_alert=True)
     
-    # العودة للقائمة الرئيسية
+    # عرض القائمة الرئيسية
     from utils.keyboards import get_main_menu
     user_role = user.get('role', 'USER')
     
-    await callback.message.delete()
+    try:
+        await callback.message.delete()
+    except:
+        pass  # إذا فشل الحذف، لا مشكلة
+    
     await callback.message.answer(
         get_text("main_menu", lang),
         reply_markup=get_main_menu(user_role, lang)

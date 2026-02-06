@@ -57,6 +57,7 @@ async def execute_broadcast(callback: types.CallbackQuery, state: FSMContext, bo
     success_count = 0
     fail_count = 0
     batch_size = 20  # إرسال على دفعات
+    delay_between_messages = 0.1  # 100ms بين كل رسالة (آمن لتيليجرام)
     
     for i in range(0, len(users), batch_size):
         batch = users[i:i+batch_size]
@@ -64,10 +65,14 @@ async def execute_broadcast(callback: types.CallbackQuery, state: FSMContext, bo
             try:
                 await bot.copy_message(chat_id=user_id, from_chat_id=from_chat, message_id=msg_id)
                 success_count += 1
-                await asyncio.sleep(0.05)  # تفادي قيود تيليجرام
+                await asyncio.sleep(delay_between_messages)  # تفادي قيود تيليجرام (30 رسالة/ثانية)
             except Exception as e:
                 logger.error(f"Failed to broadcast to {user_id}: {e}")
                 fail_count += 1
+                # إذا كان الخطأ FloodWait، انتظر أكثر
+                if "flood" in str(e).lower():
+                    logger.warning("FloodWait detected, slowing down...")
+                    await asyncio.sleep(1)
         
         # تحديث التقدم
         if i + batch_size < len(users):
