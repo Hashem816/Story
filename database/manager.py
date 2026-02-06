@@ -134,6 +134,11 @@ class DatabaseManager:
                 await db.execute("ALTER TABLE users ADD COLUMN language TEXT")
             except: pass
             
+            # تحديث جدول payment_methods لإضافة Soft Delete
+            try:
+                await db.execute("ALTER TABLE payment_methods ADD COLUMN deleted_at DATETIME DEFAULT NULL")
+            except: pass
+            
             # الإعدادات الافتراضية
             for key, val in DEFAULT_SETTINGS:
                 await db.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, val))
@@ -413,9 +418,10 @@ class DatabaseManager:
 
     # --- طرق الدفع ---
     async def get_payment_methods(self, only_active: bool = True) -> List[Dict[str, Any]]:
-        query = "SELECT * FROM payment_methods"
+        """جلب طرق الدفع مع دعم Soft Delete"""
+        query = "SELECT * FROM payment_methods WHERE deleted_at IS NULL"
         if only_active:
-            query += " WHERE is_active = 1"
+            query += " AND is_active = 1"
         db = await self.connect()
         cursor = await db.execute(query)
         return [dict(row) for row in await cursor.fetchall()]
@@ -426,10 +432,36 @@ class DatabaseManager:
         await db.commit()
 
     async def get_payment_method(self, method_id: int) -> Optional[Dict[str, Any]]:
+        """جلب طريقة دفع محددة"""
         db = await self.connect()
-        cursor = await db.execute("SELECT * FROM payment_methods WHERE id = ?", (method_id,))
+        cursor = await db.execute("SELECT * FROM payment_methods WHERE id = ? AND deleted_at IS NULL", (method_id,))
         row = await cursor.fetchone()
         return dict(row) if row else None
+    
+    async def soft_delete_payment_method(self, method_id: int) -> bool:
+        """حذف طريقة دفع بشكل Soft Delete"""
+        db = await self.connect()
+        try:
+            # التحقق من عدم وجود طلبات مرتبطة نشطة
+            cursor = await db.execute(
+                "SELECT COUNT(*) as count FROM orders WHERE payment_method_id = ? AND status NOT IN ('COMPLETED', 'FAILED', 'CANCELED')",
+                (method_id,)
+            )
+            active_orders = (await cursor.fetchone())['count']
+            
+            if active_orders > 0:
+                return False  # لا يمكن الحذف لوجود طلبات نشطة
+            
+            # Soft Delete
+            await db.execute(
+                "UPDATE payment_methods SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (method_id,)
+            )
+            await db.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error soft deleting payment method: {e}")
+            return False
 
     # --- الإحصائيات المحسّنة ---
     async def get_stats(self) -> Dict[str, Any]:
