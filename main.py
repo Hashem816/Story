@@ -28,6 +28,7 @@ from config.settings import BOT_TOKEN
 from database.manager import db_manager
 from middlewares.auth import AdminMiddleware, AuthMiddleware
 from middlewares.throttling import ThrottlingMiddleware
+from middlewares.error_handler import ErrorHandlerMiddleware
 from handlers import (
     user, admin, products, admin_modes, admin_orders, 
     admin_stats, admin_broadcast, admin_coupons, 
@@ -168,12 +169,15 @@ async def main():
     dp.errors.register(error_handler)
     
     # تسجيل الميدلوير بالترتيب الصحيح
-    # الترتيب مهم: Throttling -> Admin -> Auth
+    # الترتيب مهم: ErrorHandler -> Throttling -> Admin -> Auth
+    dp.message.middleware(ErrorHandlerMiddleware())
+    
     throttling_middleware = ThrottlingMiddleware()
     dp.message.middleware(throttling_middleware)
     dp.message.middleware(AdminMiddleware())
     dp.message.middleware(AuthMiddleware())
     
+    dp.callback_query.middleware(ErrorHandlerMiddleware())
     dp.callback_query.middleware(AdminMiddleware())
     dp.callback_query.middleware(AuthMiddleware())
     

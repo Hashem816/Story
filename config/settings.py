@@ -13,6 +13,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0")) # Super Admin ID من ملف البي
 # إعدادات قاعدة البيانات
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = str(BASE_DIR / "store_v2.db")
+DATABASE_PATH = DB_PATH # Alias for compatibility
 
 # إعدادات API (Item4Gamer)
 ITEM4GAMER_API_KEY = os.getenv("ITEM4GAMER_API_KEY")

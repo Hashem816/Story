@@ -18,6 +18,14 @@ class AdminStates(StatesGroup):
     waiting_for_support_msg = State()
     waiting_for_balance_amount = State()
     waiting_for_admin_password = State()
+    waiting_for_dollar_rate = State()
+    
+    # إدارة الكوبونات
+    waiting_for_coupon_code = State()
+    waiting_for_coupon_value = State()
+    waiting_for_coupon_min_amount = State()
+    waiting_for_coupon_max_uses = State()
+    waiting_for_coupon_expiry = State()
 
 @router.message(F.text.in_(["⚙️ لوحة التحكم", "⚙️ Admin Panel"]))
 async def admin_panel(message: types.Message, is_support: bool, user_role: str, user: dict):
@@ -532,6 +540,75 @@ async def admin_user_role_finish(callback: types.CallbackQuery, is_admin: bool, 
     target_user = await db_manager.get_user(user_id)
     await show_user_details(callback, target_user, lang)
 
+# --- إعدادات وضع التشغيل والطوارئ ---
+@router.callback_query(F.data == "admin_store_status")
+async def admin_store_status(callback: types.CallbackQuery, is_admin: bool, user: dict):
+    """عرض إعدادات وضع التشغيل والطوارئ"""
+    if not is_admin: return
+    
+    lang = get_user_language(user)
+    store_mode = await db_manager.get_setting("store_mode", "MANUAL")
+    emergency = await db_manager.get_setting("emergency_stop", "0")
+    
+    mode_text = {"AUTO": "🤖 تلقائي", "MANUAL": "👤 يدوي", "MAINTENANCE": "🛠 صيانة"}.get(store_mode, store_mode)
+    emergency_text = "🚨 مفعل (متوقف)" if emergency == "1" else "✅ معطل (يعمل)"
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🤖 تلقائي", callback_data="admin_set_mode_AUTO"),
+        InlineKeyboardButton(text="👤 يدوي", callback_data="admin_set_mode_MANUAL")
+    )
+    builder.row(InlineKeyboardButton(text="🛠 وضع الصيانة", callback_data="admin_set_mode_MAINTENANCE"))
+    builder.row(InlineKeyboardButton(text="🚨 تبديل وضع الطوارئ", callback_data="admin_toggle_emergency"))
+    builder.row(InlineKeyboardButton(text=get_text("btn_back", lang), callback_data="admin_main"))
+    
+    await callback.message.edit_text(
+        f"🔌 *إعدادات تشغيل المتجر*\n\n"
+        f"وضع التشغيل الحالي: `{mode_text}`\n"
+        f"وضع الطوارئ: `{emergency_text}`\n\n"
+        f"ℹ️ وضع الطوارئ يوقف جميع العمليات فوراً لجميع المستخدمين.",
+        parse_mode="Markdown",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("admin_set_mode_"))
+async def admin_set_store_mode(callback: types.CallbackQuery, is_admin: bool, user: dict):
+    """تغيير وضع تشغيل المتجر"""
+    if not is_admin: return
+    
+    new_mode = callback.data.split("_")[3]
+    await db_manager.set_setting("store_mode", new_mode)
+    
+    # تسجيل العملية
+    await db_manager.log_admin_action(
+        admin_id=callback.from_user.id,
+        action="STORE_MODE_CHANGE",
+        details=f"تغيير وضع المتجر إلى: {new_mode}"
+    )
+    
+    await callback.answer(f"✅ تم تغيير الوضع إلى {new_mode}")
+    await admin_store_status(callback, is_admin, user)
+
+@router.callback_query(F.data == "admin_toggle_emergency")
+async def admin_toggle_emergency(callback: types.CallbackQuery, is_admin: bool, user: dict):
+    """تبديل وضع الطوارئ"""
+    if not is_admin: return
+    
+    current = await db_manager.get_setting("emergency_stop", "0")
+    new_val = "1" if current == "0" else "0"
+    await db_manager.set_setting("emergency_stop", new_val)
+    
+    # تسجيل العملية
+    await db_manager.log_admin_action(
+        admin_id=callback.from_user.id,
+        action="EMERGENCY_TOGGLE",
+        details=f"تغيير وضع الطوارئ إلى: {new_val}"
+    )
+    
+    status_msg = "🚨 تم تفعيل وضع الطوارئ وإيقاف المتجر!" if new_val == "1" else "✅ تم إلغاء وضع الطوارئ وإعادة تشغيل المتجر."
+    await callback.answer(status_msg, show_alert=True)
+    await admin_store_status(callback, is_admin, user)
+
 # --- إعداد رسالة الدعم ---
 @router.callback_query(F.data == "admin_support_msg")
 async def admin_support_msg_start(callback: types.CallbackQuery, state: FSMContext, is_admin: bool, user: dict):
@@ -578,3 +655,309 @@ async def admin_support_msg_save(message: types.Message, state: FSMContext, is_a
         action="SUPPORT_MESSAGE_UPDATE",
         details="تحديث رسالة الدعم"
     )
+
+# --- إعدادات سعر الدولار ---
+@router.callback_query(F.data == "admin_dollar_settings")
+async def admin_dollar_settings(callback: types.CallbackQuery, is_admin: bool, user: dict):
+    """عرض إعدادات سعر الدولار الحالية"""
+    if not is_admin: return
+    
+    lang = get_user_language(user)
+    current_rate = await db_manager.get_setting("dollar_rate", "12500")
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="✏️ تحديث السعر", callback_data="admin_dollar_update"))
+    builder.row(InlineKeyboardButton(text=get_text("btn_back", lang), callback_data="admin_main"))
+    
+    await callback.message.edit_text(
+        f"💵 *إعدادات سعر الصرف*\n\nالسعر الحالي: `1$ = {current_rate} ل.س`\n\nيتم استخدام هذا السعر لتحويل أسعار المنتجات وشحن الرصيد.",
+        parse_mode="Markdown",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data == "admin_dollar_update")
+async def admin_dollar_update_start(callback: types.CallbackQuery, state: FSMContext, is_admin: bool, user: dict):
+    """بدء تحديث سعر الدولار"""
+    if not is_admin: return
+    
+    lang = get_user_language(user)
+    await state.set_state(AdminStates.waiting_for_dollar_rate)
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text=get_text("btn_cancel", lang), callback_data="admin_dollar_settings"))
+    
+    await callback.message.edit_text(
+        "💵 أرسل سعر الصرف الجديد (مثلاً: 13000):",
+        reply_markup=builder.as_markup()
+    )
+
+@router.message(AdminStates.waiting_for_dollar_rate)
+async def admin_dollar_update_finish(message: types.Message, state: FSMContext, is_admin: bool, user: dict):
+    """إتمام تحديث سعر الدولار"""
+    if not is_admin: return
+    
+    lang = get_user_language(user)
+    try:
+        new_rate = int(message.text.strip())
+        if new_rate <= 0: raise ValueError
+        
+        await db_manager.set_setting("dollar_rate", str(new_rate))
+        await state.clear()
+        
+        # تسجيل العملية
+        await db_manager.log_admin_action(
+            admin_id=message.from_user.id,
+            action="DOLLAR_RATE_UPDATE",
+            details=f"تحديث سعر الصرف إلى: {new_rate}"
+        )
+        
+        await message.answer(f"✅ تم تحديث سعر الصرف إلى: `{new_rate} ل.س`", parse_mode="Markdown")
+        
+        # العودة للقائمة
+        await admin_dollar_settings(types.CallbackQuery(
+            id="dummy", from_user=message.from_user, data="admin_dollar_settings",
+            chat_instance="dummy", message=message
+        ), is_admin, user)
+        
+    except ValueError:
+        await message.answer("⚠️ يرجى إدخال رقم صحيح أكبر من صفر.")
+
+# --- إدارة الكوبونات ---
+@router.callback_query(F.data == "admin_coupons")
+async def admin_coupons_main(callback: types.CallbackQuery, is_admin: bool, user: dict):
+    """القائمة الرئيسية لإدارة الكوبونات"""
+    if not is_admin: return
+    
+    lang = get_user_language(user)
+    coupons = await db_manager.get_all_coupons()
+    
+    builder = InlineKeyboardBuilder()
+    for c in coupons:
+        status = "✅" if c['is_active'] else "❌"
+        builder.row(InlineKeyboardButton(text=f"{status} {c['code']} ({c['value']}$)", callback_data=f"admin_coupon_view_{c['id']}"))
+    
+    builder.row(InlineKeyboardButton(text="➕ إضافة كوبون جديد", callback_data="admin_coupon_add_start"))
+    builder.row(InlineKeyboardButton(text=get_text("btn_back", lang), callback_data="admin_main"))
+    
+    await callback.message.edit_text(
+        "🎟️ *إدارة الكوبونات*\n\nاختر كوبوناً لعرض تفاصيله أو أضف كوبوناً جديداً:",
+        parse_mode="Markdown",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data == "admin_coupon_add_start")
+async def admin_coupon_add_start(callback: types.CallbackQuery, state: FSMContext, is_admin: bool):
+    """بدء إضافة كوبون جديد"""
+    if not is_admin: return
+    
+    await state.set_state(AdminStates.waiting_for_coupon_code)
+    await callback.message.edit_text(
+        "🎟️ أدخل كود الكوبون الجديد (مثلاً: SAVE10):",
+        reply_markup=InlineKeyboardBuilder().row(InlineKeyboardButton(text="❌ إلغاء", callback_data="admin_coupons")).as_markup()
+    )
+
+@router.message(AdminStates.waiting_for_coupon_code)
+async def admin_coupon_code(message: types.Message, state: FSMContext):
+    """استقبال كود الكوبون"""
+    code = message.text.strip().upper()
+    existing = await db_manager.get_coupon(code)
+    if existing:
+        return await message.answer("⚠️ هذا الكود موجود بالفعل، اختر كوداً آخر:")
+    
+    await state.update_data(code=code)
+    await state.set_state(AdminStates.waiting_for_coupon_value)
+    await message.answer("💰 أدخل قيمة الخصم بالدولار (مثلاً: 5):")
+
+@router.message(AdminStates.waiting_for_coupon_value)
+async def admin_coupon_value(message: types.Message, state: FSMContext):
+    """استقبال قيمة الخصم"""
+    try:
+        value = float(message.text.strip())
+        await state.update_data(value=value)
+        await state.set_state(AdminStates.waiting_for_coupon_min_amount)
+        await message.answer("📉 أدخل الحد الأدنى للطلب لاستخدام الكوبون (مثلاً: 20):")
+    except ValueError:
+        await message.answer("⚠️ يرجى إدخال رقم صحيح.")
+
+@router.message(AdminStates.waiting_for_coupon_min_amount)
+async def admin_coupon_min(message: types.Message, state: FSMContext):
+    """استقبال الحد الأدنى"""
+    try:
+        min_amount = float(message.text.strip())
+        await state.update_data(min_amount=min_amount)
+        await state.set_state(AdminStates.waiting_for_coupon_max_uses)
+        await message.answer("🔢 أدخل أقصى عدد مرات استخدام للكوبون (مثلاً: 100):")
+    except ValueError:
+        await message.answer("⚠️ يرجى إدخال رقم صحيح.")
+
+@router.message(AdminStates.waiting_for_coupon_max_uses)
+async def admin_coupon_max(message: types.Message, state: FSMContext, is_admin: bool, user: dict):
+    """استقبال عدد المرات وإنهاء الإضافة"""
+    try:
+        max_uses = int(message.text.strip())
+        data = await state.get_data()
+        
+        await db_manager.create_coupon(
+            code=data['code'],
+            type='FIXED',
+            value=data['value'],
+            max_uses=max_uses,
+            min_amount=data['min_amount'],
+            expires_at=None,
+            created_by=message.from_user.id
+        )
+        
+        # تسجيل العملية
+        await db_manager.log_admin_action(
+            admin_id=message.from_user.id,
+            action="CREATE_COUPON",
+            details=f"إنشاء كوبون: {data['code']} بقيمة {data['value']}$"
+        )
+        
+        await state.clear()
+        await message.answer(f"✅ تم إنشاء الكوبون `{data['code']}` بنجاح!")
+        await admin_coupons_main(types.CallbackQuery(
+            id="dummy", from_user=message.from_user, data="admin_coupons",
+            chat_instance="dummy", message=message
+        ), is_admin, user)
+        
+    except ValueError:
+        await message.answer("⚠️ يرجى إدخال رقم صحيح.")
+
+@router.callback_query(F.data.startswith("admin_coupon_view_"))
+async def admin_coupon_view(callback: types.CallbackQuery, is_admin: bool):
+    """عرض تفاصيل كوبون"""
+    if not is_admin: return
+    
+    coupon_id = int(callback.data.split("_")[3])
+    db = await db_manager.connect()
+    cursor = await db.execute("SELECT * FROM coupons WHERE id = ?", (coupon_id,))
+    coupon = await cursor.fetchone()
+    
+    if not coupon:
+        return await callback.answer("❌ الكوبون غير موجود", show_alert=True)
+    
+    text = (
+        f"🎟️ *تفاصيل الكوبون*\n\n"
+        f"الكود: `{coupon['code']}`\n"
+        f"القيمة: `{coupon['value']}$`\n"
+        f"الحد الأدنى: `{coupon['min_amount']}$`\n"
+        f"الاستخدام: `{coupon['used_count']}/{coupon['max_uses']}`\n"
+        f"الحالة: `{'نشط' if coupon['is_active'] else 'معطل'}`"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🗑 حذف الكوبون", callback_data=f"admin_coupon_del_{coupon_id}"))
+    builder.row(InlineKeyboardButton(text="🔙 عودة", callback_data="admin_coupons"))
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+@router.callback_query(F.data.startswith("admin_coupon_del_"))
+async def admin_coupon_delete(callback: types.CallbackQuery, is_admin: bool, user: dict):
+    """حذف كوبون"""
+    if not is_admin: return
+    
+    coupon_id = int(callback.data.split("_")[3])
+    await db_manager.delete_coupon(coupon_id)
+    
+    # تسجيل العملية
+    await db_manager.log_admin_action(
+        admin_id=callback.from_user.id,
+        action="DELETE_COUPON",
+        details=f"حذف كوبون ID: {coupon_id}"
+    )
+    
+    await callback.answer("✅ تم حذف الكوبون")
+    await admin_coupons_main(callback, is_admin, user)
+
+# --- الإحصائيات والتقارير ---
+@router.callback_query(F.data == "admin_stats")
+async def admin_stats(callback: types.CallbackQuery, is_admin: bool, user: dict):
+    """عرض إحصائيات المتجر الشاملة"""
+    if not is_admin: return
+    
+    lang = get_user_language(user)
+    from services.analytics_service import analytics_service
+    stats = await analytics_service.get_dashboard_stats()
+    
+    if not stats:
+        return await callback.answer("⚠️ فشل جلب الإحصائيات حالياً.", show_alert=True)
+    
+    text = (
+        "📊 *إحصائيات المتجر الشاملة*\n\n"
+        "👥 *المستخدمين:*\n"
+        f"├ الإجمالي: `{stats.get('total_users', 0)}`\n"
+        f"├ جدد اليوم: `{stats.get('new_users_today', 0)}`\n"
+        f"└ محظورين: `{stats.get('blocked_users', 0)}`\n\n"
+        
+        "📦 *الطلبات:*\n"
+        f"├ الإجمالي: `{stats.get('total_orders', 0)}`\n"
+        f"├ مكتملة: `{stats.get('completed_orders', 0)}`\n"
+        f"├ قيد التنفيذ: `{stats.get('pending_orders', 0)}`\n"
+        f"└ معدل النجاح: `{stats.get('success_rate', 0):.1f}%`\n\n"
+        
+        "💰 *المالية (USD):*\n"
+        f"├ إجمالي الإيرادات: `{stats.get('total_revenue', 0):.2f}$`\n"
+        f"├ إيرادات اليوم: `{stats.get('revenue_today', 0):.2f}$`\n"
+        f"├ إيرادات الشهر: `{stats.get('revenue_month', 0):.2f}$`\n"
+        f"└ رصيد المستخدمين: `{stats.get('total_balance', 0):.2f}$`\n\n"
+        
+        "💳 *الشحن:*\n"
+        f"├ إجمالي عمليات الشحن: `{stats.get('total_deposits', 0)}`\n"
+        f"└ إجمالي المبالغ المشحونة: `{stats.get('total_deposit_amount', 0):.2f}$`"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔝 أفضل المنتجات", callback_data="admin_stats_top_prods"))
+    builder.row(InlineKeyboardButton(text=get_text("btn_back", lang), callback_data="admin_main"))
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+@router.callback_query(F.data == "admin_stats_top_prods")
+async def admin_stats_top_products(callback: types.CallbackQuery, is_admin: bool, user: dict):
+    """عرض أفضل المنتجات مبيعاً"""
+    if not is_admin: return
+    
+    lang = get_user_language(user)
+    from services.analytics_service import analytics_service
+    top_prods = await analytics_service.get_top_products(limit=10)
+    
+    if not top_prods:
+        return await callback.answer("📭 لا توجد بيانات مبيعات كافية.", show_alert=True)
+    
+    text = "🔝 *أفضل 10 منتجات مبيعاً*\n\n"
+    for i, p in enumerate(top_prods, 1):
+        text += f"{i}. `{p['name']}`\n   └ مبيعات: `{p['order_count']}` | إيرادات: `{p['total_revenue']:.2f}$`\n"
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text=get_text("btn_back", lang), callback_data="admin_stats"))
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+# --- سجل العمليات الإدارية ---
+@router.callback_query(F.data == "admin_audit_logs")
+async def admin_audit_logs(callback: types.CallbackQuery, is_admin: bool, user: dict):
+    """عرض آخر سجلات العمليات الإدارية"""
+    if not is_admin: return
+    
+    lang = get_user_language(user)
+    db = await db_manager.connect()
+    cursor = await db.execute("""
+        SELECT * FROM admin_audit_logs 
+        ORDER BY created_at DESC 
+        LIMIT 15
+    """)
+    logs = await cursor.fetchall()
+    
+    if not logs:
+        return await callback.answer("📭 السجل فارغ حالياً.", show_alert=True)
+    
+    text = "📋 *آخر العمليات الإدارية:*\n\n"
+    for log in logs:
+        dt = datetime.fromisoformat(log['created_at']).strftime('%m/%d %H:%M')
+        text += f"🕒 `{dt}` | `{log['action']}`\n└ {log['details']}\n\n"
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text=get_text("btn_back", lang), callback_data="admin_main"))
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")

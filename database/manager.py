@@ -253,15 +253,18 @@ class DatabaseManager:
         """, (user_id, OrderStatus.COMPLETED, OrderStatus.FAILED, OrderStatus.CANCELED))
         row = await cursor.fetchone()
         return row['count'] > 0
-
-    async def update_user_balance(self, user_id: int, amount: float, log_type: str, admin_id: int = None, reason: str = None, order_id: int = None):
+    async def update_user_balance(self, user_id: int, amount: float, log_type: str, admin_id: int = None, reason: str = None, order_id: int = None) -> tuple[bool, Any]:
         """
         تحديث رصيد المستخدم مع Transaction آمن
         """
         async with self._lock:
             db = await self.connect()
-            await db.execute("BEGIN")
             try:
+                # التحقق من وجود Transaction نشط
+                in_transaction = db.in_transaction
+                if not in_transaction:
+                    await db.execute("BEGIN")
+                
                 cursor = await db.execute("SELECT balance FROM users WHERE telegram_id = ?", (user_id,))
                 user = await cursor.fetchone()
                 if not user:
@@ -279,13 +282,15 @@ class DatabaseManager:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (user_id, order_id, log_type, amount, balance_before, balance_after, admin_id, reason))
                 
-                await db.commit()
+                if not in_transaction:
+                    await db.commit()
                 return True, balance_after
             except Exception as e:
-                await db.rollback()
+                if not db.in_transaction:
+                    await db.rollback()
                 return False, str(e)
 
-    # --- عمليات المنتجات والأقسام والمزودين ---
+    # --- المنتجات والأقسام والمزودين ---
     async def get_categories(self, only_active: bool = True) -> List[Dict[str, Any]]:
         query = "SELECT * FROM categories"
         if only_active:
@@ -303,6 +308,12 @@ class DatabaseManager:
         db = await self.connect()
         cursor = await db.execute("SELECT * FROM providers WHERE is_active = 1")
         return [dict(row) for row in await cursor.fetchall()]
+
+    async def get_provider(self, provider_id: int) -> Optional[Dict[str, Any]]:
+        db = await self.connect()
+        cursor = await db.execute("SELECT * FROM providers WHERE id = ?", (provider_id,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
 
     async def get_products(self, category_id: int = None, only_active: bool = True) -> List[Dict[str, Any]]:
         query = "SELECT * FROM products WHERE 1=1"
@@ -325,8 +336,8 @@ class DatabaseManager:
     async def add_product(self, category_id: int, name: str, description: str, price_usd: float, provider_id: int = None, variation_id: str = None, type: str = 'MANUAL'):
         db = await self.connect()
         await db.execute("""
-            INSERT INTO products (category_id, name, description, price_usd, provider_id, variation_id, type)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO products (category_id, name, description, price_usd, provider_id, variation_id, type, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
         """, (category_id, name, description, price_usd, provider_id, variation_id, type))
         await db.commit()
 
