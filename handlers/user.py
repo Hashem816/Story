@@ -42,7 +42,7 @@ async def cmd_start(message: types.Message, user_role: str, user: dict):
     lang = get_user_language(user)
     
     # إذا كان المستخدم جديد، عرض اختيار اللغة
-    if not user.get('language'):
+    if not lang:
         builder = InlineKeyboardBuilder()
         builder.row(
             InlineKeyboardButton(text="🇸🇦 العربية", callback_data="lang_ar"),
@@ -55,8 +55,22 @@ async def cmd_start(message: types.Message, user_role: str, user: dict):
         )
     
     await message.answer(
-        get_text("welcome", lang),
-        reply_markup=get_main_menu(user_role, lang)
+        get_text("welcome", lang or "ar"),
+        reply_markup=get_main_menu(user_role, lang or "ar")
+    )
+
+@router.message(F.text == "🌐 Language / اللغة")
+async def change_language_cmd(message: types.Message):
+    """تغيير اللغة من القائمة الرئيسية"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🇸🇦 العربية", callback_data="lang_ar"),
+        InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en")
+    )
+    await message.answer(
+        "🌐 *اختر لغتك المفضلة / Choose your language*",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
     )
 
 
@@ -64,7 +78,7 @@ async def cmd_start(message: types.Message, user_role: str, user: dict):
 @router.message(F.text.in_(["🛒 المتجر", "🛒 Store"]))
 async def show_categories(message: types.Message, user: dict):
     """عرض أقسام المتجر"""
-    lang = get_user_language(user)
+    lang = get_user_language(user) or "ar"
     
     if await db_manager.has_open_order(user['telegram_id']):
         return await message.answer(

@@ -85,7 +85,7 @@ class DatabaseManager:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
-    async def create_user(self, telegram_id: int, username: str, first_name: str = None, last_name: str = None, role: str = 'USER', language: str = 'ar'):
+    async def create_user(self, telegram_id: int, username: str, first_name: str = None, last_name: str = None, role: str = 'USER', language: str = None):
         db = await self.connect()
         async with self._lock:
             await db.execute(
@@ -266,6 +266,12 @@ class DatabaseManager:
         db = await self.connect()
         async with self._lock:
             await db.execute("UPDATE users SET currency = ? WHERE telegram_id = ?", (currency, telegram_id))
+            await db.commit()
+
+    async def update_user_language(self, telegram_id: int, language: str):
+        db = await self.connect()
+        async with self._lock:
+            await db.execute("UPDATE users SET language = ? WHERE telegram_id = ?", (language, telegram_id))
             await db.commit()
 
 db_manager = DatabaseManager(DB_PATH)

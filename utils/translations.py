@@ -301,18 +301,13 @@ TRANSLATIONS = {
     },
 }
 
-def get_text(key: str, lang: str = "ar", **kwargs) -> str:
+def get_text(key: str, lang: str = None, **kwargs) -> str:
     """
     الحصول على النص المترجم
-    
-    Args:
-        key: مفتاح النص
-        lang: اللغة (ar أو en)
-        **kwargs: متغيرات للتنسيق (مثل {count})
-    
-    Returns:
-        النص المترجم
     """
+    if not lang:
+        lang = "ar"  # اللغة الافتراضية للرسائل العامة
+    
     text = TRANSLATIONS.get(key, {}).get(lang, key)
     
     # تنسيق النص بالمتغيرات
@@ -327,13 +322,7 @@ def get_text(key: str, lang: str = "ar", **kwargs) -> str:
 def get_user_language(user_data: dict) -> str:
     """
     الحصول على لغة المستخدم من بياناته
-    
-    Args:
-        user_data: بيانات المستخدم من قاعدة البيانات
-    
-    Returns:
-        كود اللغة (ar أو en)
     """
-    if user_data and 'language' in user_data:
+    if user_data and user_data.get('language'):
         return user_data['language']
-    return 'ar'  # اللغة الافتراضية
+    return None  # إرجاع None إذا لم يتم اختيار اللغة بعد

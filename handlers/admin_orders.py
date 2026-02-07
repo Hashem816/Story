@@ -63,7 +63,8 @@ async def approve_payment(callback: types.CallbackQuery, is_operator: bool, bot:
     
     user_data = await db_manager.get_user(order['telegram_id'])
     lang = get_user_language(user_data)
-    await bot.send_message(order['telegram_id'], f"✅ تم تأكيد إيصال الدفع للطلب `#{order_id}`.\nجاري تنفيذ طلبك الآن..." if lang == "ar" else f"✅ Payment receipt confirmed for order `#{order_id}`.\nYour order is being processed...")
+    msg = "✅ تم تأكيد إيصال الدفع للطلب `#{order_id}`.\nجاري تنفيذ طلبك الآن..." if lang == "ar" else f"✅ Payment receipt confirmed for order `#{order_id}`.\nYour order is being processed..."
+    await bot.send_message(order['telegram_id'], msg, parse_mode="Markdown")
     await list_active_orders(callback, is_operator)
 
 @router.callback_query(F.data.startswith("aord_reject_pay_"))
@@ -77,7 +78,8 @@ async def reject_payment(callback: types.CallbackQuery, is_operator: bool, bot: 
     
     user_data = await db_manager.get_user(order['telegram_id'])
     lang = get_user_language(user_data)
-    await bot.send_message(order['telegram_id'], f"❌ عذراً، تم رفض إيصال الدفع للطلب `#{order_id}`. يرجى التواصل مع الدعم." if lang == "ar" else f"❌ Sorry, the payment receipt for order `#{order_id}` was rejected. Please contact support.")
+    msg = "❌ عذراً، تم رفض إيصال الدفع للطلب `#{order_id}`. يرجى التواصل مع الدعم." if lang == "ar" else f"❌ Sorry, the payment receipt for order `#{order_id}` was rejected. Please contact support."
+    await bot.send_message(order['telegram_id'], msg, parse_mode="Markdown")
     await list_active_orders(callback, is_operator)
 
 @router.callback_query(F.data.startswith("aord_complete_"))
@@ -91,7 +93,8 @@ async def complete_order(callback: types.CallbackQuery, is_operator: bool, bot: 
     
     user_data = await db_manager.get_user(order['telegram_id'])
     lang = get_user_language(user_data)
-    await bot.send_message(order['telegram_id'], f"✅ مبروك! تم تنفيذ طلبك `#{order_id}` بنجاح.\nشكراً لتعاملك معنا." if lang == "ar" else f"✅ Congratulations! Your order `#{order_id}` has been successfully executed.\nThank you for choosing us.")
+    msg = "✅ مبروك! تم تنفيذ طلبك `#{order_id}` بنجاح.\nشكراً لتعاملك معنا." if lang == "ar" else f"✅ Congratulations! Your order `#{order_id}` has been successfully executed.\nThank you for choosing us."
+    await bot.send_message(order['telegram_id'], msg, parse_mode="Markdown")
     await list_active_orders(callback, is_operator)
 
 @router.callback_query(F.data.startswith("aord_cancel_"))
@@ -105,7 +108,8 @@ async def cancel_order(callback: types.CallbackQuery, is_operator: bool, bot: Bo
     
     user_data = await db_manager.get_user(order['telegram_id'])
     lang = get_user_language(user_data)
-    await bot.send_message(order['telegram_id'], f"❌ نعتذر، تم إلغاء طلبك `#{order_id}`." if lang == "ar" else f"❌ Sorry, your order `#{order_id}` has been canceled.")
+    msg = "❌ نعتذر، تم إلغاء طلبك `#{order_id}`." if lang == "ar" else f"❌ Sorry, your order `#{order_id}` has been canceled."
+    await bot.send_message(order['telegram_id'], msg, parse_mode="Markdown")
     await list_active_orders(callback, is_operator)
 
 @router.callback_query(F.data.startswith("admin_pay_approve_"))
