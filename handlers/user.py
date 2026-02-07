@@ -28,6 +28,7 @@ class OrderProcess(StatesGroup):
     confirming = State()
     waiting_for_coupon = State()
     waiting_for_receipt = State()
+    waiting_for_coupon_main = State()
 
 class RechargeProcess(StatesGroup):
     waiting_for_amount = State()
@@ -412,10 +413,10 @@ async def set_currency_execute(callback: types.CallbackQuery):
 @router.callback_query(F.data == "use_coupon_main")
 async def use_coupon_prompt(callback: types.CallbackQuery, state: FSMContext):
     """طلب رمز الكوبون من المستخدم"""
-    await state.set_state("waiting_for_coupon_main")
+    await state.set_state(OrderProcess.waiting_for_coupon_main)
     await callback.message.edit_text("🎟️ أرسل رمز الكوبون الذي تملكه لشحن رصيدك أو الحصول على خصم:")
 
-@router.message(F.text, StateFilter("waiting_for_coupon_main"))
+@router.message(F.text, OrderProcess.waiting_for_coupon_main)
 async def use_coupon_execute(message: types.Message, state: FSMContext):
     """تنفيذ استخدام الكوبون"""
     code = message.text.strip().upper()

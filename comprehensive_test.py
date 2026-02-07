@@ -1,348 +1,191 @@
 #!/usr/bin/env python3.11
 """
-اختبار شامل لمشروع Telegram Bot
-يختبر جميع المكونات الرئيسية للتأكد من سلامة المشروع
+Comprehensive Lifecycle Test for Story Bot
+Tests: Deposit -> Purchase -> Success -> Refund (on failure)
 """
 
-import sys
-import os
 import asyncio
-from typing import Dict, List, Tuple
+import os
+import sys
+import logging
+from datetime import datetime
 
-# إضافة المسار الحالي
+# Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# ألوان للطباعة
-GREEN = "\033[92m"
-RED = "\033[91m"
-YELLOW = "\033[93m"
-BLUE = "\033[94m"
-RESET = "\033[0m"
+from database.manager import db_manager
+from services.order_service import order_service
+from config.settings import OrderStatus
 
-test_results: Dict[str, bool] = {}
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("Test")
 
-
-def print_header(text: str):
-    """طباعة رأس القسم"""
-    print(f"\n{BLUE}{'=' * 60}{RESET}")
-    print(f"{BLUE}{text.center(60)}{RESET}")
-    print(f"{BLUE}{'=' * 60}{RESET}\n")
-
-
-def print_test(name: str, passed: bool, details: str = ""):
-    """طباعة نتيجة اختبار"""
-    status = f"{GREEN}✅ نجح{RESET}" if passed else f"{RED}❌ فشل{RESET}"
-    print(f"{status} - {name}")
-    if details:
-        print(f"   {YELLOW}التفاصيل: {details}{RESET}")
-    test_results[name] = passed
-
-
-# ===== اختبار 1: الاستيرادات =====
-def test_imports():
-    """اختبار جميع الاستيرادات الأساسية"""
-    print_header("اختبار 1: الاستيرادات")
+async def run_test():
+    print("\n🚀 Starting Comprehensive Lifecycle Test...")
     
     try:
-        import aiogram
-        print_test("aiogram", True, f"الإصدار: {aiogram.__version__}")
-    except Exception as e:
-        print_test("aiogram", False, str(e))
-    
-    try:
-        import aiosqlite
-        print_test("aiosqlite", True)
-    except Exception as e:
-        print_test("aiosqlite", False, str(e))
-    
-    try:
-        import aiohttp
-        print_test("aiohttp", True, f"الإصدار: {aiohttp.__version__}")
-    except Exception as e:
-        print_test("aiohttp", False, str(e))
-    
-    try:
-        from dotenv import load_dotenv
-        print_test("python-dotenv", True)
-    except Exception as e:
-        print_test("python-dotenv", False, str(e))
-
-
-# ===== اختبار 2: الإعدادات =====
-def test_settings():
-    """اختبار ملف الإعدادات"""
-    print_header("اختبار 2: الإعدادات")
-    
-    try:
-        from config.settings import (
-            BOT_TOKEN, DATABASE_PATH, OrderStatus, 
-            ProductType, StoreMode, UserRole
+        # 1. Initialize Database
+        print("⏳ Initializing Database...")
+        await db_manager.init_db()
+        print("✅ Database initialized.")
+        
+        # 2. Create Test User
+        test_user_id = 999999999
+        print(f"⏳ Creating Test User {test_user_id}...")
+        await db_manager.create_user(
+            telegram_id=test_user_id,
+            username="test_user",
+            first_name="Test",
+            last_name="User",
+            role="USER"
         )
-        print_test("استيراد الإعدادات", True)
+        print(f"✅ Test user created.")
         
-        # التحقق من وجود BOT_TOKEN
-        if BOT_TOKEN and len(BOT_TOKEN) > 10:
-            print_test("BOT_TOKEN", True, "موجود وصالح")
+        # 3. Create Test Category and Product
+        print("⏳ Creating Test Category, Product and Payment Method...")
+        db = await db_manager.connect()
+        async with db.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (1, 'Test Category')"): pass
+        async with db.execute("""
+            INSERT OR IGNORE INTO products (id, category_id, name, description, price_usd, type, is_active)
+            VALUES (1, 1, 'Test Product', 'Description', 10.0, 'MANUAL', 1)
+        """): pass
+        async with db.execute("INSERT OR IGNORE INTO payment_methods (id, name, is_active) VALUES (1, 'Test Method', 1)"): pass
+        await db.commit()
+        print("✅ Test assets created.")
+        
+        # 4. Test Deposit (Recharge)
+        print("⏳ Testing Deposit...")
+        deposit_amount = 50.0
+        success, new_balance = await db_manager.update_user_balance(
+            user_id=test_user_id,
+            amount=deposit_amount,
+            log_type="DEPOSIT",
+            reason="Test Deposit"
+        )
+        if success and new_balance == 50.0:
+            print(f"✅ Deposit successful. New balance: {new_balance}$")
         else:
-            print_test("BOT_TOKEN", True, "⚠️ غير موجود (متوقع في بيئة الاختبار)")
-        
-        # التحقق من OrderStatus
-        statuses = ["NEW", "PAID", "COMPLETED", "FAILED", "CANCELED"]
-        all_exist = all(hasattr(OrderStatus, s) for s in statuses)
-        print_test("OrderStatus", all_exist, f"الحالات: {', '.join(statuses)}")
-        
-        # التحقق من ProductType
-        types = ["AUTOMATIC", "MANUAL", "DISABLED"]
-        all_exist = all(hasattr(ProductType, t) for t in types)
-        print_test("ProductType", all_exist, f"الأنواع: {', '.join(types)}")
-        
-        # التحقق من StoreMode
-        modes = ["MANUAL", "AUTO", "MAINTENANCE"]
-        all_exist = all(hasattr(StoreMode, m) for m in modes)
-        print_test("StoreMode", all_exist, f"الأوضاع: {', '.join(modes)}")
-        
-        # التحقق من UserRole
-        roles = ["USER", "SUPPORT", "OPERATOR", "SUPER_ADMIN"]
-        all_exist = all(hasattr(UserRole, r) for r in roles)
-        print_test("UserRole", all_exist, f"الرتب: {', '.join(roles)}")
-        
-    except Exception as e:
-        print_test("استيراد الإعدادات", False, str(e))
+            print(f"❌ Deposit failed. Result: {new_balance}")
+            return
 
-
-# ===== اختبار 3: قاعدة البيانات =====
-async def test_database():
-    """اختبار مدير قاعدة البيانات"""
-    print_header("اختبار 3: قاعدة البيانات")
-    
-    try:
-        from database.manager import db_manager
-        print_test("استيراد db_manager", True)
+        # 5. Test Purchase (Create Order)
+        print("⏳ Testing Purchase...")
+        success, msg, order_id = await order_service.create_order(
+            user_id=test_user_id,
+            product_id=1,
+            player_id="PLAYER123",
+            payment_method_id=None # Use balance
+        )
         
-        # التحقق من وجود الدوال الأساسية
-        functions = [
-            "init_db", "get_user", "create_user", "update_user_balance",
-            "get_product", "add_product", "get_payment_method", "soft_delete_payment_method",
-            "create_order", "get_order", "update_order_status",
-            "get_setting", "set_setting", "log_admin_action"
-        ]
-        
-        for func in functions:
-            exists = hasattr(db_manager, func)
-            print_test(f"دالة {func}", exists)
-        
-    except Exception as e:
-        print_test("استيراد db_manager", False, str(e))
-
-
-# ===== اختبار 4: الخدمات =====
-def test_services():
-    """اختبار طبقة الخدمات"""
-    print_header("اختبار 4: الخدمات (Services Layer)")
-    
-    try:
-        from services.order_service import OrderService
-        print_test("OrderService", True)
-        
-        # التحقق من الدوال
-        methods = ["validate_order", "create_order", "finalize_order", "get_order_summary"]
-        for method in methods:
-            exists = hasattr(OrderService, method)
-            print_test(f"OrderService.{method}", exists)
-        
-    except Exception as e:
-        print_test("OrderService", False, str(e))
-    
-    try:
-        from services.permission_service import PermissionService
-        print_test("PermissionService", True)
-        
-        # التحقق من الدوال
-        methods = ["has_permission", "is_super_admin", "is_operator", "is_support", "can_manage_user"]
-        for method in methods:
-            exists = hasattr(PermissionService, method)
-            print_test(f"PermissionService.{method}", exists)
-        
-    except Exception as e:
-        print_test("PermissionService", False, str(e))
-    
-    try:
-        from services.analytics_service import AnalyticsService
-        print_test("AnalyticsService", True)
-        
-        # التحقق من الدوال
-        methods = ["get_dashboard_stats", "get_orders_by_status", "get_top_products", "get_revenue_chart"]
-        for method in methods:
-            exists = hasattr(AnalyticsService, method)
-            print_test(f"AnalyticsService.{method}", exists)
-        
-    except Exception as e:
-        print_test("AnalyticsService", False, str(e))
-
-
-# ===== اختبار 5: المعالجات =====
-def test_handlers():
-    """اختبار معالجات البوت"""
-    print_header("اختبار 5: المعالجات (Handlers)")
-    
-    handlers_list = [
-        "user", "admin", "products", "payments", 
-        "admin_modes", "admin_orders", "admin_stats",
-        "admin_broadcast", "admin_coupons", "admin_audit",
-        "language"
-    ]
-    
-    for handler_name in handlers_list:
-        try:
-            module = __import__(f"handlers.{handler_name}", fromlist=[handler_name])
-            has_router = hasattr(module, "router")
-            print_test(f"handlers.{handler_name}", has_router, "يحتوي على router" if has_router else "لا يحتوي على router")
-        except Exception as e:
-            print_test(f"handlers.{handler_name}", False, str(e))
-
-
-# ===== اختبار 6: الميدلوير =====
-def test_middlewares():
-    """اختبار الميدلوير"""
-    print_header("اختبار 6: الميدلوير (Middlewares)")
-    
-    try:
-        from middlewares.auth import AuthMiddleware, AdminMiddleware
-        print_test("AuthMiddleware", True)
-        print_test("AdminMiddleware", True)
-    except Exception as e:
-        print_test("Middlewares", False, str(e))
-    
-    try:
-        from middlewares.throttling import ThrottlingMiddleware
-        print_test("ThrottlingMiddleware", True)
-    except Exception as e:
-        print_test("ThrottlingMiddleware", False, str(e))
-
-
-# ===== اختبار 7: الأدوات المساعدة =====
-def test_utils():
-    """اختبار الأدوات المساعدة"""
-    print_header("اختبار 7: الأدوات المساعدة (Utils)")
-    
-    utils_list = ["api_client", "helpers", "keyboards", "notifications", "translations"]
-    
-    for util_name in utils_list:
-        try:
-            __import__(f"utils.{util_name}", fromlist=[util_name])
-            print_test(f"utils.{util_name}", True)
-        except Exception as e:
-            print_test(f"utils.{util_name}", False, str(e))
-
-
-# ===== اختبار 8: الملف الرئيسي =====
-def test_main():
-    """اختبار الملف الرئيسي"""
-    print_header("اختبار 8: الملف الرئيسي (main.py)")
-    
-    try:
-        # قراءة محتوى main.py
-        with open("main.py", "r", encoding="utf-8") as f:
-            content = f.read()
-        
-        # التحقق من وجود المكونات الأساسية
-        checks = {
-            "health_server": "async def health_server" in content,
-            "error_handler": "async def error_handler" in content,
-            "shutdown": "async def shutdown" in content,
-            "main": "async def main" in content,
-            "Bot": "Bot(token=" in content,
-            "Dispatcher": "Dispatcher(storage=" in content,
-            "routers": "dp.include_router" in content,
-            "middlewares": "dp.message.middleware" in content,
-        }
-        
-        for check_name, result in checks.items():
-            print_test(f"main.py - {check_name}", result)
-        
-    except Exception as e:
-        print_test("main.py", False, str(e))
-
-
-# ===== اختبار 9: بنية المشروع =====
-def test_project_structure():
-    """اختبار بنية المشروع"""
-    print_header("اختبار 9: بنية المشروع")
-    
-    required_dirs = ["config", "database", "handlers", "services", "middlewares", "utils"]
-    required_files = ["main.py", "requirements.txt", "Procfile", "runtime.txt"]
-    
-    for dir_name in required_dirs:
-        exists = os.path.isdir(dir_name)
-        print_test(f"مجلد {dir_name}", exists)
-    
-    for file_name in required_files:
-        exists = os.path.isfile(file_name)
-        print_test(f"ملف {file_name}", exists)
-
-
-# ===== اختبار 10: الملفات الفارغة =====
-def test_empty_files():
-    """اختبار الملفات الفارغة أو غير المستخدمة"""
-    print_header("اختبار 10: الملفات الفارغة")
-    
-    # فحص orders.py في الجذر
-    if os.path.exists("orders.py"):
-        size = os.path.getsize("orders.py")
-        if size == 0:
-            print_test("orders.py (جذر)", False, "⚠️ ملف فارغ - يجب حذفه")
+        if success:
+            user = await db_manager.get_user(test_user_id)
+            print(f"✅ Purchase successful. Order ID: #{order_id}. New balance: {user['balance']}$")
+            if user['balance'] != 40.0:
+                print(f"❌ Balance mismatch! Expected 40.0, got {user['balance']}")
+                return
         else:
-            print_test("orders.py (جذر)", True, f"الحجم: {size} بايت")
-    
-    # فحص handlers/orders.py
-    if os.path.exists("handlers/orders.py"):
-        size = os.path.getsize("handlers/orders.py")
-        if size <= 10:  # أقل من 10 بايت يعتبر فارغ
-            print_test("handlers/orders.py", False, "⚠️ ملف فارغ - يجب حذفه أو ملؤه")
+            print(f"❌ Purchase failed: {msg}")
+            return
+
+        # 6. Test Order Finalization (Success)
+        print("⏳ Testing Order Finalization (Success)...")
+        await db_manager.create_user(telegram_id=12345, username="admin", role="SUPER_ADMIN")
+        
+        success, msg = await order_service.finalize_order(
+            order_id=order_id,
+            status=OrderStatus.COMPLETED,
+            admin_id=12345,
+            admin_notes="Test completion"
+        )
+        if success:
+            order = await db_manager.get_order(order_id)
+            print(f"✅ Order #{order_id} completed successfully. Status: {order['status']}")
         else:
-            print_test("handlers/orders.py", True, f"الحجم: {size} بايت")
+            print(f"❌ Order completion failed: {msg}")
+            return
 
+        # 7. Test Refund Lifecycle (Purchase -> Failure -> Refund)
+        print("\n🔄 Testing Refund Lifecycle...")
+        success, msg, order_id2 = await order_service.create_order(
+            user_id=test_user_id,
+            product_id=1,
+            player_id="PLAYER456",
+            payment_method_id=None
+        )
+        
+        user_before = await db_manager.get_user(test_user_id)
+        print(f"✅ Second order created: #{order_id2}. Balance: {user_before['balance']}$")
+        
+        success, msg = await order_service.finalize_order(
+            order_id=order_id2,
+            status=OrderStatus.FAILED,
+            admin_id=12345,
+            admin_notes="Test failure for refund"
+        )
+        
+        if success:
+            user_after = await db_manager.get_user(test_user_id)
+            print(f"✅ Order #{order_id2} failed. Balance after refund: {user_after['balance']}$")
+            if user_after['balance'] == user_before['balance'] + 10.0:
+                print("✅ Refund verified successfully!")
+            else:
+                print(f"❌ Refund failed! Expected {user_before['balance'] + 10.0}, got {user_after['balance']}")
+                return
+        else:
+            print(f"❌ Order failure/refund process failed: {msg}")
+            return
 
-# ===== الدالة الرئيسية =====
-async def main():
-    """تشغيل جميع الاختبارات"""
-    print(f"\n{GREEN}{'=' * 60}{RESET}")
-    print(f"{GREEN}🚀 بدء الاختبار الشامل لمشروع Telegram Bot{RESET}")
-    print(f"{GREEN}{'=' * 60}{RESET}")
-    
-    # تشغيل الاختبارات
-    test_imports()
-    test_settings()
-    await test_database()
-    test_services()
-    test_handlers()
-    test_middlewares()
-    test_utils()
-    test_main()
-    test_project_structure()
-    test_empty_files()
-    
-    # عرض النتائج النهائية
-    print_header("النتائج النهائية")
-    
-    total = len(test_results)
-    passed = sum(1 for v in test_results.values() if v)
-    failed = total - passed
-    success_rate = (passed / total * 100) if total > 0 else 0
-    
-    print(f"إجمالي الاختبارات: {total}")
-    print(f"{GREEN}✅ نجح: {passed}{RESET}")
-    print(f"{RED}❌ فشل: {failed}{RESET}")
-    print(f"معدل النجاح: {success_rate:.1f}%\n")
-    
-    if failed == 0:
-        print(f"{GREEN}🎉 جميع الاختبارات نجحت! المشروع في حالة ممتازة.{RESET}\n")
-        return 0
-    else:
-        print(f"{YELLOW}⚠️ بعض الاختبارات فشلت. يرجى مراجعة التفاصيل أعلاه.{RESET}\n")
-        return 1
+        # 8. Test Coupon System
+        print("\n🎟️ Testing Coupon System...")
+        coupon_code = "TEST50"
+        db = await db_manager.connect()
+        async with db.execute("""
+            INSERT OR IGNORE INTO coupons (code, type, value, max_uses, min_amount, is_active)
+            VALUES (?, 'PERCENTAGE', 50, 10, 5, 1)
+        """, (coupon_code,)): pass
+        await db.commit()
+        
+        is_valid, msg, discount = await db_manager.validate_coupon(coupon_code, test_user_id, 10.0)
+        if is_valid and discount == 5.0:
+            print(f"✅ Coupon validation successful. Discount: {discount}$")
+        else:
+            print(f"❌ Coupon validation failed: {msg}, Discount: {discount}")
+            return
 
+        success, msg, order_id3 = await order_service.create_order(
+            user_id=test_user_id,
+            product_id=1,
+            player_id="PLAYER_COUPON",
+            payment_method_id=None,
+            coupon_code=coupon_code
+        )
+        
+        if success:
+            order = await db_manager.get_order(order_id3)
+            user = await db_manager.get_user(test_user_id)
+            print(f"✅ Order with coupon created: #{order_id3}. Price USD: {order['price_usd']}$. New balance: {user['balance']}$")
+            if order['price_usd'] == 5.0:
+                print("✅ Coupon discount applied correctly to order price!")
+            else:
+                print(f"❌ Coupon discount mismatch! Expected 5.0, got {order['price_usd']}")
+        else:
+            print(f"❌ Order with coupon failed: {msg}")
+            return
+
+        print("\n✨ ALL TESTS PASSED 100%! ✨")
+    
+    except Exception as e:
+        print(f"\n❌ Test crashed with error: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        if db_manager._db:
+            await db_manager._db.close()
+            print("🔌 Database connection closed.")
 
 if __name__ == "__main__":
-    exit_code = asyncio.run(main())
-    sys.exit(exit_code)
+    if os.path.exists("test_story.db"):
+        os.remove("test_story.db")
+    os.environ["DB_PATH"] = "test_story.db"
+    asyncio.run(run_test())

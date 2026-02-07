@@ -1,0 +1,22 @@
+nohup: ignoring input
+Traceback (most recent call last):
+  File "/home/ubuntu/Story/comprehensive_test.py", line 30, in run_test
+    await db_manager.init_db()
+  File "/home/ubuntu/Story/database/manager.py", line 78, in init_db
+    await db.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, val))
+  File "/usr/local/lib/python3.11/dist-packages/aiosqlite/core.py", line 223, in execute
+    cursor = await self._execute(self._conn.execute, sql, parameters)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/aiosqlite/core.py", line 160, in _execute
+    return await future
+           ^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/aiosqlite/core.py", line 63, in _connection_worker_thread
+    result = function()
+             ^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+
+🚀 Starting Comprehensive Lifecycle Test...
+⏳ Initializing Database...
+
+❌ Test crashed with error: database is locked
+🔌 Database connection closed.

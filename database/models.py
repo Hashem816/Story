@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS orders (
     operator_id INTEGER, -- من قام بتأكيد الطلب
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id),
+    FOREIGN KEY(user_id) REFERENCES users(telegram_id),
     FOREIGN KEY(product_id) REFERENCES products(id),
     FOREIGN KEY(payment_method_id) REFERENCES payment_methods(id)
 );
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS financial_logs (
     admin_id INTEGER,
     reason TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id)
+    FOREIGN KEY(user_id) REFERENCES users(telegram_id)
 );
 """
 
@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS trust_logs (
     execution_type TEXT, 
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(order_id) REFERENCES orders(id),
-    FOREIGN KEY(user_id) REFERENCES users(id)
+    FOREIGN KEY(user_id) REFERENCES users(telegram_id)
 );
 """
 

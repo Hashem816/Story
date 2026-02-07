@@ -272,7 +272,7 @@ class OrderService:
             if status in [OrderStatus.FAILED, OrderStatus.CANCELED]:
                 if order.get('payment_method_id') is None:  # الدفع كان من الرصيد
                     await db_manager.update_user_balance(
-                        user_id=order['telegram_id'],
+                        user_id=order['user_id'],
                         amount=order['price_usd'],
                         log_type="REFUND",
                         admin_id=admin_id,
